@@ -1,0 +1,10 @@
+node_modules
+.env
+.env.local
+test-*.js
+*.md
+database-migrations.sql
+unified-ai-migrations.sql
+.git
+.gitignore
+
