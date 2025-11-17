@@ -23,7 +23,6 @@ const PORT = process.env.PORT || 3001;
 // Middleware - CORS configuration (MUST be before routes)
 app.use(cors({
   origin: [
-    'https://nexora-frontend-lac.vercel.app',
     'https://nexora-ai.org',
     'https://www.nexora-ai.org',
     'http://localhost:3000',
