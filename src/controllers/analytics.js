@@ -1,4 +1,5 @@
 import { generateMockAnalytics } from '../services/mockData.js';
+import { getYouTubeAnalytics, isYouTubeConnected } from '../services/youtube.js';
 
 // Get analytics for specific platform
 export async function getAnalyticsByPlatform(req, res) {
@@ -14,14 +15,31 @@ export async function getAnalyticsByPlatform(req, res) {
         error: `Invalid platform. Must be one of: ${validPlatforms.join(', ')}`
       });
     }
-    
-    // Generate mock data
+
+    // Check for real data first
+    if (platform === 'youtube') {
+      const connected = await isYouTubeConnected(userId);
+      if (connected) {
+        const realData = await getYouTubeAnalytics(userId);
+        if (realData) {
+          return res.json({
+            success: true,
+            platform: platform,
+            data: realData,
+            source: 'live',
+          });
+        }
+      }
+    }
+
+    // Fallback to mock data for unconnected platforms
     const analytics = generateMockAnalytics(platform, userId);
     
     res.json({
       success: true,
       platform: platform,
-      data: analytics
+      data: analytics,
+      source: 'mock',
     });
     
   } catch (error) {
@@ -40,33 +58,40 @@ export async function getCombinedAnalytics(req, res) {
     
     const platforms = ['instagram', 'youtube', 'tiktok', 'twitter'];
     const allAnalytics = {};
-    
-    platforms.forEach(platform => {
+    const sources = {};
+
+    for (const platform of platforms) {
+      // Check for real YouTube data
+      if (platform === 'youtube') {
+        const connected = await isYouTubeConnected(userId);
+        if (connected) {
+          const realData = await getYouTubeAnalytics(userId);
+          if (realData) {
+            allAnalytics[platform] = realData;
+            sources[platform] = 'live';
+            continue;
+          }
+        }
+      }
+
+      // Fallback to mock for other platforms
       allAnalytics[platform] = generateMockAnalytics(platform, userId);
-    });
-    
+      sources[platform] = 'mock';
+    }
+
     // Calculate combined metrics
+    const getFollowers = (data) => data.followers || data.subscribers || 0;
+    const getPosts = (data) => data.posts?.length || data.videos?.length || data.tweets?.length || 0;
+    const getEngagement = (data) => parseFloat(data.insights?.avgEngagementRate || 0);
+
     const combined = {
-      totalFollowers: 
-        allAnalytics.instagram.followers +
-        allAnalytics.youtube.subscribers +
-        allAnalytics.tiktok.followers +
-        allAnalytics.twitter.followers,
-      
-      totalPosts:
-        allAnalytics.instagram.posts.length +
-        allAnalytics.youtube.videos.length +
-        allAnalytics.tiktok.videos.length +
-        allAnalytics.twitter.tweets.length,
-      
+      totalFollowers: Object.values(allAnalytics).reduce((sum, data) => sum + getFollowers(data), 0),
+      totalPosts: Object.values(allAnalytics).reduce((sum, data) => sum + getPosts(data), 0),
       avgEngagement: (
-        (parseFloat(allAnalytics.instagram.insights.avgEngagementRate) +
-         parseFloat(allAnalytics.youtube.insights.avgEngagementRate) +
-         parseFloat(allAnalytics.tiktok.insights.avgEngagementRate) +
-         parseFloat(allAnalytics.twitter.insights.avgEngagementRate)) / 4
+        Object.values(allAnalytics).reduce((sum, data) => sum + getEngagement(data), 0) / platforms.length
       ).toFixed(2),
-      
-      platforms: allAnalytics
+      platforms: allAnalytics,
+      sources: sources,
     };
     
     res.json({

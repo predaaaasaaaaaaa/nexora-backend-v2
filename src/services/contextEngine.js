@@ -1,43 +1,25 @@
 import { supabase } from './supabase.js';
 import { generateMockAnalytics } from './mockData.js';
+import { getYouTubeAnalytics, isYouTubeConnected } from './youtube.js';
 
 // Get complete user context for AI
 export async function getUserContext(userId) {
   try {
-    // Fetch user profile
     const profile = await getUserProfile(userId);
-    
-    // Fetch conversation history (last 20 interactions)
-    const conversations = await getConversationHistory(userId, 20);
-    
-    // Fetch analytics for all platforms
+    const recentTopics = await getRecentChatTopics(userId);
     const analytics = await getAllPlatformAnalytics(userId);
-    
-    // Fetch scheduled posts
-    const scheduledPosts = await getScheduledPosts(userId);
-    
-    // Fetch generated ideas (last 30 days)
-    const generatedIdeas = await getGeneratedIdeas(userId);
-    
-    // Fetch feedback history
-    const feedback = await getFeedbackHistory(userId);
-    
-    // Build behavioral profile
+
     const behaviorProfile = buildBehaviorProfile({
-      conversations,
+      recentTopics,
       analytics,
-      feedback,
-      scheduledPosts,
     });
     
     return {
       userId: userId,
       profile: profile,
-      conversations: conversations,
+      conversations: [], // Current chat messages come from frontend now
+      recentTopics: recentTopics, // Summary of past chats, not full messages
       analytics: analytics,
-      scheduledPosts: scheduledPosts,
-      generatedIdeas: generatedIdeas,
-      feedback: feedback,
       behaviorProfile: behaviorProfile,
       lastUpdated: new Date().toISOString(),
     };
@@ -70,174 +52,88 @@ async function getUserProfile(userId) {
   }
 }
 
-// Get conversation history
-async function getConversationHistory(userId, limit = 20) {
+// Get recent chat TOPICS (not full messages) — prevents repetition across chats
+async function getRecentChatTopics(userId) {
   try {
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
+    // Get titles of recent conversations (which are based on first message)
+    const { data: recentChats, error } = await supabase
+      .from('coach_conversations')
+      .select('id, title, platform, updated_at')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    
+      .order('updated_at', { ascending: false })
+      .limit(10);
+
     if (error) throw error;
-    
-    return data || [];
+    if (!recentChats || recentChats.length === 0) return [];
+
+    // For each recent chat, get a brief summary (first user message + first AI response)
+    const topics = [];
+    for (const chat of recentChats.slice(0, 5)) {
+      const { data: msgs } = await supabase
+        .from('coach_messages')
+        .select('role, content')
+        .eq('conversation_id', chat.id)
+        .order('created_at', { ascending: true })
+        .limit(2);
+
+      if (msgs && msgs.length > 0) {
+        const userMsg = msgs.find(m => m.role === 'user');
+        const aiMsg = msgs.find(m => m.role === 'assistant');
+        topics.push({
+          topic: chat.title,
+          userAsked: userMsg?.content?.substring(0, 100) || '',
+          aiAdvised: aiMsg?.content?.substring(0, 150) || '',
+        });
+      }
+    }
+
+    return topics;
   } catch (error) {
-    console.error('Error fetching conversations:', error);
+    console.error('Error fetching recent topics:', error);
     return [];
   }
 }
 
-// Get analytics for all platforms
+// Get analytics for all platforms - WITH REAL DATA
 async function getAllPlatformAnalytics(userId) {
-  const platforms = ['instagram', 'youtube', 'tiktok', 'twitter'];
   const analytics = {};
-  
-  platforms.forEach(platform => {
+  const platforms = ['instagram', 'youtube', 'tiktok', 'twitter'];
+
+  for (const platform of platforms) {
+    if (platform === 'youtube') {
+      try {
+        const connected = await isYouTubeConnected(userId);
+        if (connected) {
+          const realData = await getYouTubeAnalytics(userId);
+          if (realData) {
+            analytics[platform] = realData;
+            console.log('✅ Using REAL YouTube data for AI context');
+            continue;
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching real YouTube data, falling back to mock:', err.message);
+      }
+    }
+
     analytics[platform] = generateMockAnalytics(platform, userId);
-  });
-  
+  }
+
   return analytics;
-}
-
-// Get scheduled posts
-async function getScheduledPosts(userId) {
-  try {
-    const { data, error } = await supabase
-      .from('scheduled_posts')
-      .select('*')
-      .eq('user_id', userId)
-      .gte('scheduled_time', new Date().toISOString())
-      .order('scheduled_time', { ascending: true });
-    
-    if (error) throw error;
-    
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching scheduled posts:', error);
-    return [];
-  }
-}
-
-// Get generated ideas (from conversation history for now)
-async function getGeneratedIdeas(userId) {
-  try {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', userId)
-      .gte('created_at', thirtyDaysAgo.toISOString())
-      .ilike('message', '%idea%')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching generated ideas:', error);
-    return [];
-  }
-}
-
-// Get feedback history
-async function getFeedbackHistory(userId) {
-  try {
-    const { data, error } = await supabase
-      .from('feedback')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    
-    if (error) throw error;
-    
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching feedback:', error);
-    return [];
-  }
 }
 
 // Build behavioral profile from user data
 function buildBehaviorProfile(data) {
-  const { conversations, analytics, feedback, scheduledPosts } = data;
+  const { recentTopics, analytics } = data;
   
-  // Analyze conversation patterns
-  const topTopics = analyzeConversationTopics(conversations);
-  const communicationStyle = analyzeCommunicationStyle(conversations);
-  
-  // Analyze content preferences
   const contentPreferences = analyzeContentPreferences(analytics);
-  
-  // Analyze feedback patterns
-  const feedbackPatterns = analyzeFeedbackPatterns(feedback);
-  
-  // Analyze posting behavior
-  const postingBehavior = analyzePostingBehavior(scheduledPosts, analytics);
+  const topicsSummary = recentTopics.map(t => t.topic).join(', ');
   
   return {
-    topTopics: topTopics,
-    communicationStyle: communicationStyle,
+    recentTopicsSummary: topicsSummary || 'No previous conversations',
     contentPreferences: contentPreferences,
-    feedbackPatterns: feedbackPatterns,
-    postingBehavior: postingBehavior,
-    learningInsights: generateLearningInsights({
-      topTopics,
-      contentPreferences,
-      feedbackPatterns,
-      postingBehavior,
-    }),
+    learningInsights: generateLearningInsights({ contentPreferences, recentTopics }),
   };
-}
-
-// Analyze what user talks about most
-function analyzeConversationTopics(conversations) {
-  const topics = {
-    engagement: 0,
-    growth: 0,
-    content_ideas: 0,
-    timing: 0,
-    algorithm: 0,
-    hooks: 0,
-  };
-  
-  conversations.forEach(conv => {
-    const message = (conv.message || '').toLowerCase();
-    
-    if (message.includes('engagement') || message.includes('interact')) topics.engagement++;
-    if (message.includes('grow') || message.includes('follower')) topics.growth++;
-    if (message.includes('idea') || message.includes('content')) topics.content_ideas++;
-    if (message.includes('time') || message.includes('when')) topics.timing++;
-    if (message.includes('algorithm')) topics.algorithm++;
-    if (message.includes('hook') || message.includes('caption')) topics.hooks++;
-  });
-  
-  return Object.entries(topics)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([topic, count]) => ({ topic, count }));
-}
-
-// Analyze how user communicates
-function analyzeCommunicationStyle(conversations) {
-  if (conversations.length === 0) return 'unknown';
-  
-  const avgLength = conversations.reduce((sum, c) => 
-    sum + (c.message || '').length, 0
-  ) / conversations.length;
-  
-  const hasQuestions = conversations.some(c => 
-    (c.message || '').includes('?')
-  );
-  
-  if (avgLength > 100 && hasQuestions) return 'detailed_inquisitive';
-  if (avgLength > 100) return 'detailed_thorough';
-  if (avgLength < 50 && hasQuestions) return 'brief_direct';
-  return 'conversational';
 }
 
 // Analyze content preferences from analytics
@@ -248,7 +144,6 @@ function analyzeContentPreferences(analytics) {
     avgEngagement: 0,
   };
   
-  // Find best performing platform
   let highestEngagement = 0;
   Object.entries(analytics).forEach(([platform, data]) => {
     const engagement = parseFloat(data.insights?.avgEngagementRate || 0);
@@ -260,87 +155,30 @@ function analyzeContentPreferences(analytics) {
   
   preferences.avgEngagement = highestEngagement;
   
-  // Find best content type on best platform
   if (preferences.bestPlatform && analytics[preferences.bestPlatform]) {
     const platformData = analytics[preferences.bestPlatform];
     preferences.bestContentType = platformData.insights?.topPostType || 
                                   platformData.insights?.topVideoType ||
-                                  platformData.insights?.topTweetType ||
+                                  platformData.insights?.topVideo ||
                                   'unknown';
   }
   
   return preferences;
 }
 
-// Analyze feedback patterns
-function analyzeFeedbackPatterns(feedback) {
-  if (feedback.length === 0) {
-    return { helpful_rate: 0, avg_rating: 0, total_feedback: 0 };
-  }
-  
-  const helpful = feedback.filter(f => f.helpful === true).length;
-  const totalRatings = feedback.filter(f => f.rating).length;
-  const avgRating = totalRatings > 0
-    ? feedback.reduce((sum, f) => sum + (f.rating || 0), 0) / totalRatings
-    : 0;
-  
-  return {
-    helpful_rate: ((helpful / feedback.length) * 100).toFixed(1) + '%',
-    avg_rating: avgRating.toFixed(1),
-    total_feedback: feedback.length,
-  };
-}
-
-// Analyze posting behavior
-function analyzePostingBehavior(scheduledPosts, analytics) {
-  const behavior = {
-    scheduled_count: scheduledPosts.length,
-    platforms_using: [],
-    posting_consistency: 'unknown',
-  };
-  
-  // Check which platforms they schedule for
-  const platformCounts = {};
-  scheduledPosts.forEach(post => {
-    platformCounts[post.platform] = (platformCounts[post.platform] || 0) + 1;
-  });
-  
-  behavior.platforms_using = Object.keys(platformCounts);
-  
-  // Determine consistency
-  if (scheduledPosts.length > 10) behavior.posting_consistency = 'highly_consistent';
-  else if (scheduledPosts.length > 5) behavior.posting_consistency = 'moderately_consistent';
-  else if (scheduledPosts.length > 0) behavior.posting_consistency = 'starting_out';
-  
-  return behavior;
-}
-
 // Generate learning insights
 function generateLearningInsights(profiles) {
   const insights = [];
   
-  // Topic-based insights
-  if (profiles.topTopics && profiles.topTopics.length > 0) {
-    const topTopic = profiles.topTopics[0].topic || '';
-    insights.push(`User frequently asks about: ${topTopic.replace(/_/g, ' ')}`);
+  if (profiles.recentTopics && profiles.recentTopics.length > 0) {
+    const topics = profiles.recentTopics.map(t => t.topic).slice(0, 3).join(', ');
+    insights.push(`Recent chat topics: ${topics}`);
   }
   
-  // Performance insights
   if (profiles.contentPreferences && profiles.contentPreferences.bestPlatform) {
     insights.push(`Strongest performance on ${profiles.contentPreferences.bestPlatform}`);
   }
   
-  // Behavior insights
-  if (profiles.postingBehavior && profiles.postingBehavior.posting_consistency === 'highly_consistent') {
-    insights.push('User is highly consistent with scheduling');
-  }
-  
-  // Communication insights
-  if (profiles.communicationStyle && profiles.communicationStyle !== 'unknown') {
-    insights.push(`Communication style: ${profiles.communicationStyle.replace(/_/g, ' ')}`);
-  }
-  
-  // Always return at least one insight
   if (insights.length === 0) {
     insights.push('Building user profile - more insights coming as you use NEXORA');
   }
@@ -348,9 +186,10 @@ function generateLearningInsights(profiles) {
   return insights;
 }
 
-// Save interaction to build learning loop
+// Save interaction — now uses coach_messages table via controller
 export async function saveInteraction(userId, interaction) {
   try {
+    // Legacy support — save to old conversations table if it exists
     const { data, error } = await supabase
       .from('conversations')
       .insert({
@@ -363,36 +202,15 @@ export async function saveInteraction(userId, interaction) {
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      // Table might not exist anymore, that's fine
+      console.log('Legacy conversations table not available, using coach_messages instead');
+      return null;
+    }
     
     return data;
   } catch (error) {
     console.error('Error saving interaction:', error);
-    throw error;
+    return null;
   }
 }
-
-// Save feedback
-export async function saveFeedback(userId, conversationId, feedbackData) {
-  try {
-    const { data, error } = await supabase
-      .from('feedback')
-      .insert({
-        user_id: userId,
-        conversation_id: conversationId,
-        helpful: feedbackData.helpful,
-        rating: feedbackData.rating,
-        notes: feedbackData.notes,
-      })
-      .select()
-      .single();
-    
-    if (error) throw error;
-    
-    return data;
-  } catch (error) {
-    console.error('Error saving feedback:', error);
-    throw error;
-  }
-}
-

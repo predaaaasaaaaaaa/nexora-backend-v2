@@ -1,3 +1,4 @@
+import competitorsRoutes from './routes/competitors.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -15,7 +16,9 @@ import analyticsRoutes from './routes/analytics.js';
 import ideasRoutes from './routes/ideas.js';
 import schedulerRoutes from './routes/scheduler.js';
 import feedbackRoutes from './routes/feedback.js';
+import youtubeRoutes from './routes/youtube.js';
 import { coachingExpertise } from './knowledge/expertise.js';
+import { startNotificationCron } from './services/notificationService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -41,6 +44,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/ideas', ideasRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/youtube', youtubeRoutes);
+app.use('/api/competitors', competitorsRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -62,5 +67,5 @@ app.get('/test-knowledge', (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startNotificationCron();
 });
-

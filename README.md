@@ -36,6 +36,7 @@ NEXORA is an AI coach for social media creators that:
 - Supabase authentication
 - JWT token-based API protection
 - Row-level security on all data
+- Cloudflare Protection
 
 ## Getting Started
 
@@ -183,10 +184,10 @@ nexora-backend/
 
 ✅ **Production Ready**
 - Unified AI system with memory
-- 4-platform support
+- 4-platform support (soon)
 - Mock data for MVP demo
 - Authentication & security
-- Ready for Vercel deployment
+- Vercel deployment = True
 
 ## Testing
 
