@@ -1,12 +1,5 @@
-import competitorsRoutes from './routes/competitors.js';
 import dotenv from 'dotenv';
 dotenv.config();
-
-// DEBUG: Check Groq API key
-console.log('🔍 DEBUG - Groq API Key:');
-console.log('  - Exists:', !!process.env.GROQ_API_KEY);
-console.log('  - Length:', process.env.GROQ_API_KEY?.length);
-console.log('  - First 10 chars:', process.env.GROQ_API_KEY?.substring(0, 10));
 
 import express from 'express';
 import cors from 'cors';
@@ -17,13 +10,10 @@ import ideasRoutes from './routes/ideas.js';
 import schedulerRoutes from './routes/scheduler.js';
 import feedbackRoutes from './routes/feedback.js';
 import youtubeRoutes from './routes/youtube.js';
-import { coachingExpertise } from './knowledge/expertise.js';
-import { startNotificationCron } from './services/notificationService.js';
+import competitorsRoutes from './routes/competitors.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
-// Middleware - CORS configuration (MUST be before routes)
 app.use(cors({
   origin: [
     'https://nexora-ai.org',
@@ -35,9 +25,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 app.use(express.json());
 
-// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/coach', coachRoutes);
 app.use('/api/analytics', analyticsRoutes);
@@ -47,25 +37,8 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/youtube', youtubeRoutes);
 app.use('/api/competitors', competitorsRoutes);
 
-// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: "Nexora backend running" });
+  res.json({ status: 'Nexora backend running' });
 });
 
-// Test knowledge endpoint
-app.get('/test-knowledge', (req, res) => {
-  const platforms = Array.from(
-    new Set(
-      coachingExpertise
-        .map((item) => item.platform)
-        .filter((p) => p === 'instagram' || p === 'youtube' || p === 'tiktok' || p === 'twitter')
-    )
-  );
-  res.json({ platforms });
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  startNotificationCron();
-});
+export default app;
