@@ -1,5 +1,4 @@
 import { supabase } from './supabase.js';
-import { generateMockAnalytics } from './mockData.js';
 import { getYouTubeAnalytics, isYouTubeConnected } from './youtube.js';
 
 // Get complete user context for AI
@@ -17,8 +16,8 @@ export async function getUserContext(userId) {
     return {
       userId: userId,
       profile: profile,
-      conversations: [], // Current chat messages come from frontend now
-      recentTopics: recentTopics, // Summary of past chats, not full messages
+      conversations: [],
+      recentTopics: recentTopics,
       analytics: analytics,
       behaviorProfile: behaviorProfile,
       lastUpdated: new Date().toISOString(),
@@ -55,7 +54,6 @@ async function getUserProfile(userId) {
 // Get recent chat TOPICS (not full messages) — prevents repetition across chats
 async function getRecentChatTopics(userId) {
   try {
-    // Get titles of recent conversations (which are based on first message)
     const { data: recentChats, error } = await supabase
       .from('coach_conversations')
       .select('id, title, platform, updated_at')
@@ -66,7 +64,6 @@ async function getRecentChatTopics(userId) {
     if (error) throw error;
     if (!recentChats || recentChats.length === 0) return [];
 
-    // For each recent chat, get a brief summary (first user message + first AI response)
     const topics = [];
     for (const chat of recentChats.slice(0, 5)) {
       const { data: msgs } = await supabase
@@ -94,30 +91,36 @@ async function getRecentChatTopics(userId) {
   }
 }
 
-// Get analytics for all platforms - WITH REAL DATA
+// Get analytics for all platforms - REAL DATA ONLY, no mock fallback
 async function getAllPlatformAnalytics(userId) {
   const analytics = {};
-  const platforms = ['instagram', 'youtube', 'tiktok', 'twitter'];
 
-  for (const platform of platforms) {
-    if (platform === 'youtube') {
-      try {
-        const connected = await isYouTubeConnected(userId);
-        if (connected) {
-          const realData = await getYouTubeAnalytics(userId);
-          if (realData) {
-            analytics[platform] = realData;
-            console.log('✅ Using REAL YouTube data for AI context');
-            continue;
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching real YouTube data, falling back to mock:', err.message);
+  // YouTube — real data only
+  try {
+    const connected = await isYouTubeConnected(userId);
+    if (connected) {
+      const realData = await getYouTubeAnalytics(userId);
+      if (realData) {
+        analytics['youtube'] = realData;
+        console.log('✅ Using REAL YouTube data for AI context');
+      } else {
+        // Connected but no data yet
+        analytics['youtube'] = { _status: 'connected_no_data' };
       }
+    } else {
+      // Not connected — explicitly mark as not connected, NO mock data
+      analytics['youtube'] = { _status: 'not_connected' };
+      console.log('ℹ️ YouTube not connected — no data injected into AI context');
     }
-
-    analytics[platform] = generateMockAnalytics(platform, userId);
+  } catch (err) {
+    console.error('Error fetching YouTube data:', err.message);
+    analytics['youtube'] = { _status: 'error' };
   }
+
+  // Other platforms — not connected yet, no mock data
+  analytics['instagram'] = { _status: 'not_connected' };
+  analytics['tiktok'] = { _status: 'not_connected' };
+  analytics['twitter'] = { _status: 'not_connected' };
 
   return analytics;
 }
@@ -136,7 +139,7 @@ function buildBehaviorProfile(data) {
   };
 }
 
-// Analyze content preferences from analytics
+// Analyze content preferences from real analytics only
 function analyzeContentPreferences(analytics) {
   const preferences = {
     bestPlatform: null,
@@ -146,6 +149,9 @@ function analyzeContentPreferences(analytics) {
   
   let highestEngagement = 0;
   Object.entries(analytics).forEach(([platform, data]) => {
+    // Skip status-only entries (not connected / no data)
+    if (data._status) return;
+    
     const engagement = parseFloat(data.insights?.avgEngagementRate || 0);
     if (engagement > highestEngagement) {
       highestEngagement = engagement;
@@ -186,10 +192,9 @@ function generateLearningInsights(profiles) {
   return insights;
 }
 
-// Save interaction — now uses coach_messages table via controller
+// Save interaction
 export async function saveInteraction(userId, interaction) {
   try {
-    // Legacy support — save to old conversations table if it exists
     const { data, error } = await supabase
       .from('conversations')
       .insert({
@@ -203,7 +208,6 @@ export async function saveInteraction(userId, interaction) {
       .single();
     
     if (error) {
-      // Table might not exist anymore, that's fine
       console.log('Legacy conversations table not available, using coach_messages instead');
       return null;
     }

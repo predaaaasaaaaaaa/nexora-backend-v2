@@ -356,7 +356,18 @@ function buildUserMessage(request, context, isUserNiche, selectedNiche) {
 
     if (platform && context.analytics[platform]) {
       const data = context.analytics[platform];
-      sections.push(formatPlatformData(platform, data));
+
+      // ── Handle not-connected / no-data statuses ──
+      if (data._status === 'not_connected') {
+        sections.push(`[YouTube Status] NOT CONNECTED — The user has NOT linked their YouTube account yet. You have ZERO real data about their channel. Do NOT make up any channel names, subscriber counts, view counts, video titles, or any other channel-specific information. If they ask about their channel data, politely tell them to connect their YouTube account in Settings first.`);
+      } else if (data._status === 'connected_no_data') {
+        sections.push(`[YouTube Status] Connected but no data available yet. Tell the user their account is connected but data is still loading.`);
+      } else if (data._status === 'error') {
+        sections.push(`[YouTube Status] Error fetching data. Do not fabricate any channel information.`);
+      } else {
+        // Real data available
+        sections.push(formatPlatformData(platform, data));
+      }
     } else {
       const perf = context.behaviorProfile.contentPreferences;
       if (perf.bestPlatform) {
