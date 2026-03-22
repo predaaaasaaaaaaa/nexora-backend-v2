@@ -11,6 +11,7 @@ import schedulerRoutes from './routes/scheduler.js';
 import feedbackRoutes from './routes/feedback.js';
 import youtubeRoutes from './routes/youtube.js';
 import competitorsRoutes from './routes/competitors.js';
+import subscriptionRoutes from './routes/subscription.js';
 
 const app = express();
 
@@ -26,6 +27,14 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+// Webhook route needs raw body for signature verification
+// This MUST come BEFORE express.json()
+app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }), (req, res, next) => {
+  req.rawBody = req.body.toString();
+  req.body = JSON.parse(req.body);
+  next();
+});
+
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
@@ -36,6 +45,7 @@ app.use('/api/ideas', ideasRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/youtube', youtubeRoutes);
 app.use('/api/competitors', competitorsRoutes);
+app.use('/api/subscription', subscriptionRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'Nexora backend running' });
