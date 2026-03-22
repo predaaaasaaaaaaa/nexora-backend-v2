@@ -10,13 +10,17 @@ import {
   getReactiveRecommendations,
 } from '../controllers/scheduler.js';
 import { requireAuth } from '../middleware/auth.js';
+import { requireFeature } from '../middleware/planEnforcement.js';
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(requireAuth);
 
-// AI recommendations (reactive — takes current scheduled posts into account)
+// All scheduler routes require scheduler feature (Pro+)
+router.use(requireFeature('scheduler'));
+
+// AI recommendations
 router.get('/recommendations', getAllSchedules);
 router.post('/recommendations/reactive', getReactiveRecommendations);
 
