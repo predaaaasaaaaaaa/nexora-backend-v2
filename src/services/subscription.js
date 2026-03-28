@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════
-// NEXORA — Lemon Squeezy Subscription Service
+// NEXORA — Paddle Subscription Service
 // Handles checkout creation, plan mapping, usage limits
 // ═══════════════════════════════════════════════════════
 
@@ -9,7 +9,7 @@ import { supabase } from './supabase.js';
 export const PLANS = {
   free: {
     name: 'Free',
-    variantId: null,
+    priceId: null,
     limits: {
       coachMessagesPerDay: 5,
       contentIdeasPerWeek: 3,
@@ -21,7 +21,7 @@ export const PLANS = {
   },
   pro: {
     name: 'Nexora Pro',
-    variantId: process.env.NEXORA_PRO_VARIANT_ID || '1434704',
+    priceId: process.env.PADDLE_PRO_PRICE_ID,
     limits: {
       coachMessagesPerDay: 15,
       contentIdeasPerWeek: 30,
@@ -33,7 +33,7 @@ export const PLANS = {
   },
   max: {
     name: 'Nexora Max',
-    variantId: process.env.NEXORA_MAX_VARIANT_ID || '1434797',
+    priceId: process.env.PADDLE_MAX_PRICE_ID,
     limits: {
       coachMessagesPerDay: Infinity,
       contentIdeasPerWeek: Infinity,
@@ -45,11 +45,11 @@ export const PLANS = {
   },
 };
 
-// Map variant ID to plan name
-export function getPlanFromVariant(variantId) {
-  const id = String(variantId);
-  if (id === String(PLANS.pro.variantId)) return 'pro';
-  if (id === String(PLANS.max.variantId)) return 'max';
+// Map Paddle price ID to plan name
+export function getPlanFromPriceId(priceId) {
+  const id = String(priceId);
+  if (id === String(PLANS.pro.priceId)) return 'pro';
+  if (id === String(PLANS.max.priceId)) return 'max';
   return 'free';
 }
 
@@ -60,7 +60,6 @@ export function getPlanLimits(plan) {
 
 // ─── Usage Tracking ───────────────────────────────────
 
-// Get or create current month's usage record
 export async function getUsage(userId) {
   const periodStart = new Date();
   periodStart.setDate(1);
@@ -97,7 +96,6 @@ export async function getUsage(userId) {
   return data;
 }
 
-// Increment a usage counter
 export async function incrementUsage(userId, field, amount = 1) {
   const usage = await getUsage(userId);
   if (!usage) return null;
@@ -119,7 +117,6 @@ export async function incrementUsage(userId, field, amount = 1) {
   return data;
 }
 
-// Check if user can perform action based on plan limits
 export async function checkLimit(userId, plan, action) {
   const limits = getPlanLimits(plan);
   const usage = await getUsage(userId);
@@ -174,7 +171,6 @@ export async function checkLimit(userId, plan, action) {
   }
 }
 
-// Get today's coach message count
 async function getDailyCoachMessages(userId) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -193,43 +189,38 @@ async function getDailyCoachMessages(userId) {
   return count || 0;
 }
 
-// Get this week's content ideas count
 async function getWeeklyContentIdeas(userId) {
   const usage = await getUsage(userId);
   return usage?.content_ideas_used || 0;
 }
 
-// ─── Checkout URL Creation ────────────────────────────
+// ─── Paddle Checkout URL Creation ─────────────────────
 
-export async function createCheckoutUrl(variantId, userEmail, userId) {
-  const API_KEY = process.env.LEMONSQUEEZY_API_KEY;
-  const STORE_ID = process.env.LEMONSQUEEZY_STORE_ID || '323527';
+export async function createCheckoutUrl(priceId, userEmail, userId) {
+  const API_KEY = process.env.PADDLE_API_KEY;
+  const baseUrl = process.env.PADDLE_ENV === 'sandbox'
+    ? 'https://sandbox-api.paddle.com'
+    : 'https://api.paddle.com';
 
-  const response = await fetch('https://api.lemonsqueezy.com/v1/checkouts', {
+  const response = await fetch(`${baseUrl}/transactions`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
-      'Content-Type': 'application/vnd.api+json',
-      'Accept': 'application/vnd.api+json',
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      data: {
-        type: 'checkouts',
-        attributes: {
-          checkout_data: {
-            email: userEmail,
-            custom: {
-              user_id: userId,
-            },
-          },
-          product_options: {
-            redirect_url: 'https://nexora-ai.org/dashboard?upgraded=true',
-          },
+      items: [
+        {
+          price_id: priceId,
+          quantity: 1,
         },
-        relationships: {
-          store: { data: { type: 'stores', id: STORE_ID } },
-          variant: { data: { type: 'variants', id: String(variantId) } },
-        },
+      ],
+      customer_email: userEmail,
+      custom_data: {
+        user_id: userId,
+      },
+      checkout: {
+        url: 'https://nexora-ai.org/dashboard?upgraded=true',
       },
     }),
   });
@@ -237,11 +228,18 @@ export async function createCheckoutUrl(variantId, userEmail, userId) {
   const result = await response.json();
 
   if (!response.ok) {
-    console.error('Lemon Squeezy checkout error:', result);
+    console.error('Paddle checkout error:', result);
     throw new Error('Failed to create checkout');
   }
 
-  return result.data.attributes.url;
+  // Paddle returns a checkout URL in the transaction
+  const checkoutUrl = result.data?.checkout?.url;
+  if (!checkoutUrl) {
+    console.error('Paddle: No checkout URL in response:', result);
+    throw new Error('No checkout URL returned');
+  }
+
+  return checkoutUrl;
 }
 
 // ─── Subscription Management ──────────────────────────
@@ -249,7 +247,7 @@ export async function createCheckoutUrl(variantId, userEmail, userId) {
 export async function getUserSubscription(userId) {
   const { data, error } = await supabase
     .from('profiles')
-    .select('plan, subscription_status, ls_subscription_id, trial_ends_at, subscription_ends_at, plan_activated_at')
+    .select('plan, subscription_status, paddle_subscription_id, paddle_customer_id, trial_ends_at, subscription_ends_at, plan_activated_at')
     .eq('user_id', userId)
     .single();
 
@@ -278,16 +276,15 @@ export async function updateSubscription(userId, updates) {
   return data;
 }
 
-// Log subscription event for audit trail
 export async function logSubscriptionEvent(eventType, payload, userId = null, plan = null) {
   const { error } = await supabase
     .from('subscription_events')
     .insert({
       user_id: userId,
       event_type: eventType,
-      ls_subscription_id: payload?.data?.id,
-      ls_customer_id: payload?.data?.attributes?.customer_id?.toString(),
-      variant_id: payload?.data?.attributes?.variant_id?.toString(),
+      paddle_subscription_id: payload?.data?.id || null,
+      paddle_customer_id: payload?.data?.customer_id || null,
+      price_id: payload?.data?.items?.[0]?.price?.id || null,
       plan,
       payload,
     });
