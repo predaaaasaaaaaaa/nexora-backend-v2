@@ -27,10 +27,10 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Webhook route needs raw body for signature verification
+// Webhook route needs raw body for Paddle signature verification
 // This MUST come BEFORE express.json()
 app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }), (req, res, next) => {
-  req.rawBody = req.body.toString();
+  req.rawBody = req.body.toString('utf8');
   req.body = JSON.parse(req.body);
   next();
 });
