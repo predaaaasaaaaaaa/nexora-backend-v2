@@ -17,11 +17,10 @@ const router = express.Router();
 // Public routes
 router.get('/plans', getPlans);
 
-// Webhook — NO auth (Lemon Squeezy calls this directly)
-// Signature verification happens inside the handler
+// Webhook — NO auth (Paddle calls this directly)
 router.post('/webhook', handleWebhook);
 
-// Protected routes (require logged-in user)
+// Protected routes
 router.get('/current', requireAuth, getCurrentPlan);
 router.post('/checkout', requireAuth, createCheckout);
 router.get('/portal', requireAuth, getPortalUrl);
