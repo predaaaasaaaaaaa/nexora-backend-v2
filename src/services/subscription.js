@@ -194,48 +194,6 @@ async function getWeeklyContentIdeas(userId) {
   return usage?.content_ideas_used || 0;
 }
 
-// ─── Paddle Checkout URL Creation ─────────────────────
-
-export async function createCheckoutUrl(priceId, userEmail, userId) {
-  const API_KEY = process.env.PADDLE_API_KEY;
-
-  const response = await fetch('https://api.paddle.com/transactions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      items: [
-        {
-          price_id: priceId,
-          quantity: 1,
-        },
-      ],
-      custom_data: {
-        user_id: userId,
-      },
-      checkout: {
-        url: 'https://nexora-ai.org/pricing',
-      },
-    }),
-  });
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    console.error('Paddle checkout error:', result);
-    throw new Error('Failed to create checkout');
-  }
-
-  const checkoutUrl = result.data?.checkout?.url;
-  if (!checkoutUrl) {
-    console.error('Paddle: No checkout URL in response:', result);
-    throw new Error('No checkout URL returned');
-  }
-
-  return checkoutUrl;
-}
 
 // ─── Subscription Management ──────────────────────────
 
