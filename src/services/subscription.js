@@ -215,6 +215,9 @@ export async function createCheckoutUrl(priceId, userEmail, userId) {
       custom_data: {
         user_id: userId,
       },
+      checkout: {
+        url: 'https://nexora-ai.org/pricing',
+      },
     }),
   });
 
