@@ -197,53 +197,14 @@ async function getWeeklyContentIdeas(userId) {
 // ─── Paddle Checkout URL Creation ─────────────────────
 
 export async function createCheckoutUrl(priceId, userEmail, userId) {
-  const API_KEY = process.env.PADDLE_API_KEY;
-  const baseUrl = process.env.PADDLE_ENV === 'sandbox'
-    ? 'https://sandbox-api.paddle.com'
-    : 'https://api.paddle.com';
-
-  const response = await fetch(`${baseUrl}/transactions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      items: [
-        {
-          price_id: priceId,
-          quantity: 1,
-        },
-      ],
-      customer_email: userEmail,
-      custom_data: {
-        user_id: userId,
-      },
-      checkout: {
-        url: null,
-      },
-      settings: {
-        success_url: 'https://nexora-ai.org/dashboard?upgraded=true',
-      },
-    }),
+  const params = new URLSearchParams({
+    items: `${priceId}:1`,
+    customer_email: userEmail,
+    custom_data: JSON.stringify({ user_id: userId }),
+    success_url: 'https://nexora-ai.org/dashboard?upgraded=true',
   });
 
-  const result = await response.json();
-
-  if (!response.ok) {
-    console.error('Paddle checkout error:', result);
-    throw new Error('Failed to create checkout');
-  }
-  
-  console.log('Paddle checkout response:', JSON.stringify(result.data?.checkout, null, 2));
-
-  const checkoutUrl = result.data?.checkout?.url;
-  if (!checkoutUrl) {
-    console.error('Paddle: No checkout URL in response:', result);
-    throw new Error('No checkout URL returned');
-  }
-
-  return checkoutUrl;
+  return `https://checkout.paddle.com/checkout?${params.toString()}`;
 }
 
 // ─── Subscription Management ──────────────────────────
