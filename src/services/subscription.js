@@ -220,7 +220,10 @@ export async function createCheckoutUrl(priceId, userEmail, userId) {
         user_id: userId,
       },
       checkout: {
-        url: 'https://nexora-ai.org/dashboard?upgraded=true',
+        url: null,
+      },
+      settings: {
+        success_url: 'https://nexora-ai.org/dashboard?upgraded=true',
       },
     }),
   });
@@ -231,9 +234,6 @@ export async function createCheckoutUrl(priceId, userEmail, userId) {
     console.error('Paddle checkout error:', result);
     throw new Error('Failed to create checkout');
   }
-
-  // Debug: log full Paddle response
-  console.log('Paddle response:', JSON.stringify(result, null, 2));
   
   const checkoutUrl = result.data?.checkout?.url;
   if (!checkoutUrl) {
