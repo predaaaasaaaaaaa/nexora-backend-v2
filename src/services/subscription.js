@@ -235,6 +235,8 @@ export async function createCheckoutUrl(priceId, userEmail, userId) {
     throw new Error('Failed to create checkout');
   }
   
+  console.log('Paddle checkout response:', JSON.stringify(result.data?.checkout, null, 2));
+
   const checkoutUrl = result.data?.checkout?.url;
   if (!checkoutUrl) {
     console.error('Paddle: No checkout URL in response:', result);
