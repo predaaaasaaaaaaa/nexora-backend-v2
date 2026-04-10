@@ -232,7 +232,9 @@ export async function createCheckoutUrl(priceId, userEmail, userId) {
     throw new Error('Failed to create checkout');
   }
 
-  // Paddle returns a checkout URL in the transaction
+  // Debug: log full Paddle response
+  console.log('Paddle response:', JSON.stringify(result, null, 2));
+  
   const checkoutUrl = result.data?.checkout?.url;
   if (!checkoutUrl) {
     console.error('Paddle: No checkout URL in response:', result);
