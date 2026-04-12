@@ -5,7 +5,6 @@
 
 import {
   PLANS,
-  createCheckoutUrl,
   getUserSubscription,
   getUsage,
   checkLimit,
@@ -94,30 +93,6 @@ export async function getCurrentPlan(req, res) {
   }
 }
 
-// POST /api/subscription/checkout
-export async function createCheckout(req, res) {
-  try {
-    const userId = req.user.id;
-    const { plan } = req.body;
-
-    if (!plan || !PLANS[plan] || plan === 'free') {
-      return res.status(400).json({ success: false, error: 'Invalid plan' });
-    }
-
-    const profile = await getUserProfile(userId);
-    if (!profile) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    const priceId = PLANS[plan].priceId;
-    const checkoutUrl = await createCheckoutUrl(priceId, profile.email, userId);
-
-    res.json({ success: true, checkoutUrl });
-  } catch (error) {
-    console.error('Error creating checkout:', error);
-    res.status(500).json({ success: false, error: 'Failed to create checkout' });
-  }
-}
 
 // GET /api/subscription/portal — Paddle cancel/update URL
 export async function getPortalUrl(req, res) {

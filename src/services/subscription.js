@@ -194,7 +194,6 @@ async function getWeeklyContentIdeas(userId) {
   return usage?.content_ideas_used || 0;
 }
 
-
 // ─── Subscription Management ──────────────────────────
 
 export async function getUserSubscription(userId) {

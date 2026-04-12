@@ -22,7 +22,6 @@ router.post('/webhook', handleWebhook);
 
 // Protected routes
 router.get('/current', requireAuth, getCurrentPlan);
-router.post('/checkout', requireAuth, createCheckout);
 router.get('/portal', requireAuth, getPortalUrl);
 
 export default router;
