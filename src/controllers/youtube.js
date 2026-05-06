@@ -4,6 +4,7 @@ import {
     getYouTubeAnalytics,
     isYouTubeConnected,
     disconnectYouTube,
+    verifyState,
   } from '../services/youtube.js';
   
   // Start YouTube OAuth flow
@@ -27,22 +28,31 @@ import {
   
   // Handle OAuth callback from Google
   export async function youtubeCallback(req, res) {
+    const frontend = process.env.FRONTEND_URL || 'https://nexora-ai.org';
     try {
       const { code, state } = req.query;
-      const userId = state; // we passed userId as state in getAuthUrl
-  
-      if (!code || !userId) {
-        return res.redirect(`${process.env.FRONTEND_URL || 'https://nexora-ai.org'}/settings?youtube=error&reason=missing_params`);
+
+      if (!code || !state) {
+        return res.redirect(`${frontend}/settings?youtube=error&reason=missing_params`);
       }
-  
-      const result = await handleCallback(code, userId);
-  
+
+      // Verify the HMAC-signed state we minted in getAuthUrl. This is what
+      // binds the OAuth callback to the user that started the flow — without
+      // it, anyone could complete OAuth and write tokens for any user.
+      const verified = verifyState(state);
+      if (!verified) {
+        return res.redirect(`${frontend}/settings?youtube=error&reason=invalid_state`);
+      }
+
+      const result = await handleCallback(code, verified.userId);
+
       // Redirect back to frontend settings page with success
-      res.redirect(`${process.env.FRONTEND_URL || 'https://nexora-ai.org'}/settings?youtube=connected&channel=${encodeURIComponent(result.channel_title)}`);
-  
+      res.redirect(`${frontend}/settings?youtube=connected&channel=${encodeURIComponent(result.channel_title)}`);
+
     } catch (error) {
       console.error('Error in YouTube callback:', error);
-      res.redirect(`${process.env.FRONTEND_URL || 'https://nexora-ai.org'}/settings?youtube=error&reason=${encodeURIComponent(error.message)}`);
+      // Don't echo error.message back to the URL — it can leak internals.
+      res.redirect(`${frontend}/settings?youtube=error&reason=callback_failed`);
     }
   }
   

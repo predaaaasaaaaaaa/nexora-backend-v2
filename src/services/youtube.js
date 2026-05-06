@@ -1,13 +1,59 @@
+import crypto from 'crypto';
 import { google } from 'googleapis';
 import { supabase } from './supabase.js';
 
 // Create OAuth2 client
 function createOAuth2Client() {
+  const redirectUri = process.env.YOUTUBE_REDIRECT_URI;
+  if (!redirectUri) {
+    // Refuse to silently fall back to a localhost redirect in production —
+    // Google would happily mint tokens for a redirect_uri the operator didn't intend.
+    throw new Error('YOUTUBE_REDIRECT_URI is not configured');
+  }
   return new google.auth.OAuth2(
     process.env.YOUTUBE_CLIENT_ID,
     process.env.YOUTUBE_CLIENT_SECRET,
-    process.env.YOUTUBE_REDIRECT_URI || 'http://localhost:3001/api/youtube/callback'
+    redirectUri
   );
+}
+
+// HMAC-sign the OAuth state so we can verify on callback that the userId
+// in `state` was minted by us (not chosen by an attacker).
+function getStateSecret() {
+  const secret = process.env.OAUTH_STATE_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error('OAUTH_STATE_SECRET must be set to a >=32 char value');
+  }
+  return secret;
+}
+
+function signState(payload) {
+  const json = JSON.stringify(payload);
+  const b64 = Buffer.from(json, 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', getStateSecret()).update(b64).digest('base64url');
+  return `${b64}.${sig}`;
+}
+
+export function verifyState(state) {
+  if (typeof state !== 'string' || !state.includes('.')) return null;
+  const [b64, sig] = state.split('.');
+  if (!b64 || !sig) return null;
+
+  const expected = crypto.createHmac('sha256', getStateSecret()).update(b64).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+
+  // Reject expired state (10 min window).
+  if (!payload?.userId || !payload?.exp || Date.now() > payload.exp) return null;
+  return payload;
 }
 
 // Generate OAuth URL for user to connect their YouTube
@@ -19,11 +65,17 @@ export function getAuthUrl(userId) {
     'https://www.googleapis.com/auth/yt-analytics.readonly',
   ];
 
+  const state = signState({
+    userId,
+    nonce: crypto.randomBytes(16).toString('hex'),
+    exp: Date.now() + 10 * 60 * 1000,
+  });
+
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
     prompt: 'consent',
-    state: userId,
+    state,
   });
 }
 
