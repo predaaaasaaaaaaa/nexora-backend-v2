@@ -9,10 +9,14 @@
 // available, falling back to IP. That stops one attacker behind NAT from
 // using up the bucket of every neighbour, and makes per-user quotas honest.
 
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
-function userOrIpKey(req) {
-  return req.user?.id ? `u:${req.user.id}` : `ip:${req.ip}`;
+// IPv6 needs to be bucketed by /64 subnet, otherwise each request looks
+// like a different address and the limit is trivially bypassed. The
+// library exports ipKeyGenerator to do that normalization for us.
+function userOrIpKey(req, res) {
+  if (req.user?.id) return `u:${req.user.id}`;
+  return `ip:${ipKeyGenerator(req, res)}`;
 }
 
 // Auth — guard against credential stuffing on /signin and signup spam.
