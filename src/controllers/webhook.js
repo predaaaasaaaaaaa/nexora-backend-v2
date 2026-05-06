@@ -130,14 +130,22 @@ export async function handleWebhook(req, res) {
     }
 
     const secret = process.env.PADDLE_WEBHOOK_SECRET;
+    if (!secret) {
+      console.error('Webhook: PADDLE_WEBHOOK_SECRET not configured');
+      return res.status(500).json({ error: 'Webhook misconfigured' });
+    }
     const signedPayload = `${ts}:${rawBody}`;
     const hmac = crypto.createHmac('sha256', secret);
     const expectedSignature = hmac.update(signedPayload).digest('hex');
 
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(expectedSignature),
-      Buffer.from(h1)
-    );
+    // Length-guard before timingSafeEqual — passing buffers of different
+    // sizes throws RangeError, which would have crashed the request handler
+    // and let an attacker DoS the webhook with malformed h1 values.
+    const expectedBuf = Buffer.from(expectedSignature);
+    const providedBuf = Buffer.from(h1);
+    const isValid =
+      expectedBuf.length === providedBuf.length &&
+      crypto.timingSafeEqual(expectedBuf, providedBuf);
 
     if (!isValid) {
       console.error('Webhook: Invalid signature');
