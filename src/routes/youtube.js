@@ -26,18 +26,3 @@ router.get('/status', requireAuth, checkYouTubeConnection);
 router.delete('/disconnect', requireAuth, removeYouTube);
 
 export default router;
-
-// TEMPORARY TEST - remove later
-router.get('/test', (req, res) => {
-    res.json({
-      success: true,
-      message: 'YouTube routes working!',
-      endpoints: [
-        'GET /api/youtube/connect (auth required)',
-        'GET /api/youtube/callback (Google redirects here)',
-        'GET /api/youtube/analytics (auth required)',
-        'GET /api/youtube/status (auth required)',
-        'DELETE /api/youtube/disconnect (auth required)',
-      ],
-    });
-  });
