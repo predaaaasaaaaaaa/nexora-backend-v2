@@ -7,7 +7,9 @@ const router = express.Router();
 // Public routes
 router.post('/signup', signUp);
 router.post('/signin', signIn);
-router.post('/signout', signOut);
+
+// signOut needs the caller's JWT to actually invalidate the session.
+router.post('/signout', requireAuth, signOut);
 
 // Protected routes (require authentication)
 router.get('/profile', requireAuth, getProfile);

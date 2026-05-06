@@ -27,6 +27,9 @@ export async function requireAuth(req, res, next) {
     
     // Attach user to request object
     req.user = user;
+    // Expose the raw JWT so controllers that need to act *as* the user
+    // (e.g. signOut, user-scoped Supabase clients) can use it.
+    req.userToken = token;
     next();
     
   } catch (error) {

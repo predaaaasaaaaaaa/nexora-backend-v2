@@ -86,22 +86,30 @@ export async function signIn(req, res) {
 }
 
 // Sign out user
+//
+// supabase.auth.signOut() called on the service-role client is a no-op for
+// the user's session. To actually invalidate the access/refresh tokens we
+// have to ask the auth admin API to revoke the specific JWT.
 export async function signOut(req, res) {
   try {
-    const { error } = await supabase.auth.signOut();
-    
+    const token = req.userToken;
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const { error } = await supabase.auth.admin.signOut(token);
     if (error) throw error;
-    
+
     res.json({
       success: true,
       message: 'Signed out successfully'
     });
-    
+
   } catch (error) {
     console.error('Signout error:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to sign out'
     });
   }
 }
