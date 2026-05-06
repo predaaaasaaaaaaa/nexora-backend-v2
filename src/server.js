@@ -85,4 +85,14 @@ app.get('/health', (req, res) => {
   res.json({ status: 'Nexora backend running' });
 });
 
+// Bind a real port when running directly (npm run dev / docker / VPS).
+// Skip on Vercel — there the file is imported by the serverless wrapper
+// and calling listen() would fight the platform.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`Nexora backend listening on http://localhost:${PORT}`);
+  });
+}
+
 export default app;
