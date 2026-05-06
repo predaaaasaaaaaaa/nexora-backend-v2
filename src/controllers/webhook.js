@@ -23,21 +23,59 @@ function verifyWebhookSignature(rawBody, signature) {
   const digest = hmac.update(rawBody).digest('hex');
 
   try {
-    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+    const a = Buffer.from(digest);
+    const b = Buffer.from(signature);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   } catch {
     return false;
   }
 }
 
-// Find user by custom_data passed during checkout
+// Verify the HMAC-signed user_id we minted server-side at checkout time.
+// custom_data is round-tripped by Paddle, so without a signature the field
+// is fully attacker-controlled.
+function verifySignedUserId(signed) {
+  if (typeof signed !== 'string' || !signed.includes('.')) return null;
+  const secret = process.env.CHECKOUT_USER_ID_SECRET;
+  if (!secret || secret.length < 32) return null;
+
+  const [b64, sig] = signed.split('.');
+  if (!b64 || !sig) return null;
+
+  const expected = crypto.createHmac('sha256', secret).update(b64).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!payload?.userId || !payload?.exp || Date.now() > payload.exp) return null;
+  return payload.userId;
+}
+
+// Find user from a Paddle webhook payload.
+//
+// Trust order:
+//   1. custom_data.user_id_signed — only accepted if the HMAC verifies.
+//   2. paddle_customer_id already linked to a profile (set by us on
+//      subscription.created).
+//
+// We deliberately do NOT fall back to email lookup. Email matching lets
+// any Paddle customer who owns the same email upgrade an arbitrary
+// nexora account, and combined with email-mutation bugs becomes a
+// straight account takeover of subscriptions.
 async function findUser(payload) {
-  // Check custom_data first (set during checkout)
   const customData = payload?.data?.custom_data;
-  if (customData?.user_id) {
-    return customData.user_id;
+  if (customData?.user_id_signed) {
+    const verified = verifySignedUserId(customData.user_id_signed);
+    if (verified) return verified;
   }
 
-  // Fallback: find by Paddle customer ID in profiles
   const paddleCustomerId = payload?.data?.customer_id;
   if (paddleCustomerId) {
     const { data } = await supabase
@@ -46,17 +84,6 @@ async function findUser(payload) {
       .eq('paddle_customer_id', String(paddleCustomerId))
       .single();
     if (data?.user_id) return data.user_id;
-  }
-
-  // Last resort: find by email
-  const email = payload?.data?.customer?.email;
-  if (email) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('user_id')
-      .eq('email', email)
-      .single();
-    return data?.user_id || null;
   }
 
   return null;

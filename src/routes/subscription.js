@@ -4,6 +4,7 @@ import {
   getPlans,
   getCurrentPlan,
   getPortalUrl,
+  getCheckoutToken,
 } from '../controllers/subscription.js';
 import { handleWebhook } from '../controllers/webhook.js';
 
@@ -13,5 +14,6 @@ router.get('/plans', getPlans);
 router.post('/webhook', handleWebhook);
 router.get('/current', requireAuth, getCurrentPlan);
 router.get('/portal', requireAuth, getPortalUrl);
+router.get('/checkout-token', requireAuth, getCheckoutToken);
 
 export default router;

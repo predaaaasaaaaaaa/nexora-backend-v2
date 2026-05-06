@@ -3,6 +3,7 @@
 // Checkout URLs, plan info, usage data
 // ═══════════════════════════════════════════════════════
 
+import crypto from 'crypto';
 import {
   PLANS,
   getUserSubscription,
@@ -90,6 +91,32 @@ export async function getCurrentPlan(req, res) {
   } catch (error) {
     console.error('Error fetching current plan:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch plan' });
+  }
+}
+
+
+// GET /api/subscription/checkout-token — short-lived signed user_id the
+// frontend embeds as custom_data.user_id_signed when opening Paddle checkout.
+// The webhook verifies this so an attacker can't substitute another user's id.
+export async function getCheckoutToken(req, res) {
+  try {
+    const secret = process.env.CHECKOUT_USER_ID_SECRET;
+    if (!secret || secret.length < 32) {
+      console.error('CHECKOUT_USER_ID_SECRET missing or too short');
+      return res.status(500).json({ success: false, error: 'Checkout misconfigured' });
+    }
+
+    const payload = {
+      userId: req.user.id,
+      exp: Date.now() + 30 * 60 * 1000, // 30 minutes
+    };
+    const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', secret).update(b64).digest('base64url');
+
+    res.json({ success: true, token: `${b64}.${sig}`, expiresAt: payload.exp });
+  } catch (error) {
+    console.error('Error minting checkout token:', error);
+    res.status(500).json({ success: false, error: 'Failed to mint checkout token' });
   }
 }
 
