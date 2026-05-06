@@ -1,6 +1,7 @@
 import { processAIRequest } from '../services/unifiedAI.js';
 import { supabase, supabaseAsUser } from '../services/supabase.js';
 import { searchCompetitors, analyzeCompetitor, compareWithUser, formatCompetitorForAI } from '../services/competitors.js';
+import { isSupportedPlatform, SUPPORTED_PLATFORMS } from '../utils/helpers.js';
 
 // List all conversations for a user
 export async function listConversations(req, res) {
@@ -30,12 +31,14 @@ export async function createConversation(req, res) {
     const userId = req.user.id;
     const { platform } = req.body;
 
+    const safePlatform = platform && isSupportedPlatform(platform) ? platform : 'youtube';
+
     const db = supabaseAsUser(req.userToken);
     const { data, error } = await db
       .from('coach_conversations')
       .insert({
         user_id: userId,
-        platform: platform || 'youtube',
+        platform: safePlatform,
         title: 'New Chat',
       })
       .select()
@@ -339,8 +342,14 @@ export async function chatWithCoach(req, res) {
     const { message, platform, conversationId } = req.body;
     const userId = req.user.id;
 
-    if (!message) {
+    if (!message || typeof message !== 'string') {
       return res.status(400).json({ success: false, error: 'Message is required' });
+    }
+    if (platform && !isSupportedPlatform(platform)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid platform. Must be one of: ${SUPPORTED_PLATFORMS.join(', ')}`,
+      });
     }
 
     let activeConversationId = conversationId;

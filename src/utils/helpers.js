@@ -1,31 +1,23 @@
 // Helper function to validate email
 export function validateEmail(email) {
-  // TODO: Implement email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 }
 
-// Helper function to sanitize input
-export function sanitizeInput(input) {
-  // TODO: Implement input sanitization
-  return input.trim();
+// Allowlist of platform identifiers we accept anywhere in the API.
+// Centralizing this prevents a typo or stray "<script>" string from being
+// passed into Supabase rows that later get rendered or fed to the AI.
+export const SUPPORTED_PLATFORMS = ['instagram', 'youtube', 'tiktok', 'twitter'];
+
+export function isSupportedPlatform(p) {
+  return typeof p === 'string' && SUPPORTED_PLATFORMS.includes(p);
 }
 
-// Helper function to format response
-export function formatResponse(data, success = true, message = null) {
-  // TODO: Implement response formatting
-  return {
-    success,
-    data,
-    message,
-    timestamp: new Date().toISOString()
-  };
-}
+// Restricted set of content types accepted on scheduled_posts.
+export const SUPPORTED_CONTENT_TYPES = ['video', 'short', 'reel', 'post', 'story', 'tweet', 'thread'];
 
-// Helper function to generate unique ID
-export function generateId() {
-  // TODO: Implement ID generation
-  return Math.random().toString(36).substr(2, 9);
+export function isSupportedContentType(t) {
+  return typeof t === 'string' && SUPPORTED_CONTENT_TYPES.includes(t);
 }
 
 

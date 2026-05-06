@@ -1,5 +1,11 @@
 import { supabase, supabaseAsUser } from '../services/supabase.js';
 import { processAIRequest } from '../services/unifiedAI.js';
+import {
+  isSupportedPlatform,
+  isSupportedContentType,
+  SUPPORTED_PLATFORMS,
+  SUPPORTED_CONTENT_TYPES,
+} from '../utils/helpers.js';
 
 // ============================================================
 // AI RECOMMENDATIONS
@@ -168,6 +174,20 @@ export async function createScheduledPost(req, res) {
       });
     }
 
+    if (!isSupportedPlatform(platform)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid platform. Must be one of: ${SUPPORTED_PLATFORMS.join(', ')}`,
+      });
+    }
+
+    if (content_type && !isSupportedContentType(content_type)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid content_type. Must be one of: ${SUPPORTED_CONTENT_TYPES.join(', ')}`,
+      });
+    }
+
     // Check the scheduled time is in the future
     if (new Date(scheduled_at) <= new Date()) {
       return res.status(400).json({
@@ -220,6 +240,27 @@ export async function updateScheduledPost(req, res) {
 
     if (Object.keys(cleanUpdates).length === 0) {
       return res.status(400).json({ success: false, error: 'No valid fields to update.' });
+    }
+
+    if (cleanUpdates.platform !== undefined && !isSupportedPlatform(cleanUpdates.platform)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid platform. Must be one of: ${SUPPORTED_PLATFORMS.join(', ')}`,
+      });
+    }
+
+    if (cleanUpdates.content_type !== undefined && !isSupportedContentType(cleanUpdates.content_type)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid content_type. Must be one of: ${SUPPORTED_CONTENT_TYPES.join(', ')}`,
+      });
+    }
+
+    // Constrain status changes to known values so a malicious caller can't
+    // wedge the row into an unexpected state machine.
+    if (cleanUpdates.status !== undefined &&
+        !['scheduled', 'posted', 'missed', 'cancelled'].includes(cleanUpdates.status)) {
+      return res.status(400).json({ success: false, error: 'Invalid status value.' });
     }
 
     // If rescheduling, validate future time
