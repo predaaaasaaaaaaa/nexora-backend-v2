@@ -97,7 +97,8 @@ export async function getUsage(userId) {
 }
 
 // Allowlist the columns we'll touch so a caller bug can't write into
-// arbitrary fields on usage_tracking.
+// arbitrary fields on usage_tracking. Mirrored in the increment_usage
+// Postgres function (see security-migrations.sql).
 const USAGE_FIELDS = new Set([
   'coach_messages_used',
   'content_ideas_used',
@@ -110,20 +111,20 @@ export async function incrementUsage(userId, field, amount = 1) {
     return null;
   }
 
-  const usage = await getUsage(userId);
-  if (!usage) return null;
+  const periodStart = new Date();
+  periodStart.setUTCDate(1);
+  periodStart.setUTCHours(0, 0, 0, 0);
+  const periodStr = periodStart.toISOString().split('T')[0];
 
-  const next = Math.max(0, (usage[field] || 0) + amount);
-
-  const { data, error } = await supabase
-    .from('usage_tracking')
-    .update({
-      [field]: next,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', usage.id)
-    .select()
-    .single();
+  // Atomic increment via Postgres RPC. Replaces the previous
+  // read-modify-write sequence which raced when two requests landed at
+  // the same time and let a user occasionally exceed their quota.
+  const { data, error } = await supabase.rpc('increment_usage', {
+    p_user_id: userId,
+    p_period_start: periodStr,
+    p_field: field,
+    p_amount: amount,
+  });
 
   if (error) {
     console.error(`Error incrementing ${field}:`, error);
