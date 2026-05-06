@@ -66,6 +66,26 @@ async function checkAndSendReminders() {
   }
 }
 
+// Escape any user-controlled string before embedding it in HTML.
+// post.title and post.description are user input, so without this we'd
+// be rendering arbitrary HTML/JS in the recipient's mailbox.
+function escapeHtml(value) {
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Strip CR/LF from anything we put in an email subject so user content
+// can't inject extra headers (Bcc:, Subject:, etc.) on transports that
+// don't sanitize for us.
+function stripHeaderUnsafe(value) {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
+}
+
 // Send a single reminder email
 async function sendReminderEmail(email, post, reminderMinutes) {
   try {
@@ -91,32 +111,38 @@ async function sendReminderEmail(email, post, reminderMinutes) {
     };
     const emoji = platformEmoji[post.platform] || '📅';
 
+    const safeTitle = escapeHtml(post.title);
+    const safePlatform = escapeHtml(post.platform);
+    const safeContentType = escapeHtml(post.content_type);
+    const safeDescription = escapeHtml(post.description);
+    const subjectTitle = stripHeaderUnsafe(post.title);
+
     const { data, error } = await resend.emails.send({
       from: FROM_EMAIL,
       to: email,
-      subject: `${emoji} Reminder: "${post.title}" is scheduled ${timeLabel}`,
+      subject: `${emoji} Reminder: "${subjectTitle}" is scheduled ${timeLabel}`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 32px 20px;">
           <div style="text-align: center; margin-bottom: 24px;">
             <h1 style="font-size: 24px; font-weight: 700; color: #111; margin: 0;">⏰ Content Reminder</h1>
           </div>
-          
+
           <div style="background: #f8f9fa; border-radius: 12px; padding: 24px; margin-bottom: 24px;">
             <p style="color: #666; font-size: 14px; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.5px;">
               ${timeLabel}
             </p>
             <h2 style="font-size: 20px; color: #111; margin: 0 0 16px 0;">
-              ${emoji} ${post.title}
+              ${emoji} ${safeTitle}
             </h2>
-            
+
             <div style="display: flex; gap: 16px; flex-wrap: wrap;">
               <div>
                 <span style="color: #888; font-size: 12px;">Platform</span><br/>
-                <span style="font-weight: 600; color: #333; text-transform: capitalize;">${post.platform}</span>
+                <span style="font-weight: 600; color: #333; text-transform: capitalize;">${safePlatform}</span>
               </div>
               <div>
                 <span style="color: #888; font-size: 12px;">Type</span><br/>
-                <span style="font-weight: 600; color: #333; text-transform: capitalize;">${post.content_type}</span>
+                <span style="font-weight: 600; color: #333; text-transform: capitalize;">${safeContentType}</span>
               </div>
               <div>
                 <span style="color: #888; font-size: 12px;">Date</span><br/>
@@ -127,15 +153,15 @@ async function sendReminderEmail(email, post, reminderMinutes) {
                 <span style="font-weight: 600; color: #333;">${timeStr}</span>
               </div>
             </div>
-            
+
             ${post.description ? `
               <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;">
                 <span style="color: #888; font-size: 12px;">Notes</span><br/>
-                <span style="color: #333;">${post.description}</span>
+                <span style="color: #333;">${safeDescription}</span>
               </div>
             ` : ''}
           </div>
-          
+
           <p style="color: #999; font-size: 12px; text-align: center; margin: 0;">
             Sent by NEXORA • You can update notification settings in your dashboard
           </p>
