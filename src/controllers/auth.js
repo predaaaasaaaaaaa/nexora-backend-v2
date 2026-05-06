@@ -133,31 +133,55 @@ export async function getProfile(req, res) {
   }
 }
 
+// Fields a user is allowed to change on their own profile.
+// Anything billing-, identity-, or platform-related is server-managed.
+const PROFILE_WRITABLE_FIELDS = new Set([
+  'username',
+  'niche',
+  'goals',
+  'preferences',
+  'ai_context',
+]);
+
 // Update user profile
 export async function updateProfile(req, res) {
   try {
     const userId = req.user.id;
-    const updates = req.body;
-    
+    const body = req.body || {};
+
+    const updates = {};
+    for (const key of Object.keys(body)) {
+      if (PROFILE_WRITABLE_FIELDS.has(key)) {
+        updates[key] = body[key];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No editable fields provided'
+      });
+    }
+
     const { data, error } = await supabase
       .from('profiles')
       .update(updates)
       .eq('user_id', userId)
       .select()
       .single();
-    
+
     if (error) throw error;
-    
+
     res.json({
       success: true,
       profile: data
     });
-    
+
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to update profile'
     });
   }
 }
