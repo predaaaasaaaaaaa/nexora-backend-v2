@@ -1,4 +1,4 @@
-import { supabase } from '../services/supabase.js';
+import { supabase, supabaseAsUser } from '../services/supabase.js';
 import { processAIRequest } from '../services/unifiedAI.js';
 
 // ============================================================
@@ -128,7 +128,8 @@ export async function getScheduledPosts(req, res) {
     const userId = req.user.id;
     const { month, year } = req.query;
 
-    let query = supabase
+    const db = supabaseAsUser(req.userToken);
+    let query = db
       .from('scheduled_posts')
       .select('*')
       .eq('user_id', userId)
@@ -175,7 +176,8 @@ export async function createScheduledPost(req, res) {
       });
     }
 
-    const { data, error } = await supabase
+    const db = supabaseAsUser(req.userToken);
+    const { data, error } = await db
       .from('scheduled_posts')
       .insert({
         user_id: userId,
@@ -196,7 +198,7 @@ export async function createScheduledPost(req, res) {
 
   } catch (error) {
     console.error('Error creating scheduled post:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to create scheduled post' });
   }
 }
 
@@ -230,7 +232,8 @@ export async function updateScheduledPost(req, res) {
       cleanUpdates.reminder_sent = false;
     }
 
-    const { data, error } = await supabase
+    const db = supabaseAsUser(req.userToken);
+    const { data, error } = await db
       .from('scheduled_posts')
       .update(cleanUpdates)
       .eq('id', id)
@@ -245,7 +248,7 @@ export async function updateScheduledPost(req, res) {
 
   } catch (error) {
     console.error('Error updating scheduled post:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to update scheduled post' });
   }
 }
 
@@ -255,7 +258,8 @@ export async function deleteScheduledPost(req, res) {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const db = supabaseAsUser(req.userToken);
+    const { data, error } = await db
       .from('scheduled_posts')
       .delete()
       .eq('id', id)
@@ -270,7 +274,7 @@ export async function deleteScheduledPost(req, res) {
 
   } catch (error) {
     console.error('Error deleting scheduled post:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to delete scheduled post' });
   }
 }
 

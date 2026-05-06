@@ -1,5 +1,5 @@
 import { processAIRequest } from '../services/unifiedAI.js';
-import { supabase } from '../services/supabase.js';
+import { supabase, supabaseAsUser } from '../services/supabase.js';
 import { searchCompetitors, analyzeCompetitor, compareWithUser, formatCompetitorForAI } from '../services/competitors.js';
 
 // List all conversations for a user
@@ -7,7 +7,8 @@ export async function listConversations(req, res) {
   try {
     const userId = req.user.id;
 
-    const { data, error } = await supabase
+    const db = supabaseAsUser(req.userToken);
+    const { data, error } = await db
       .from('coach_conversations')
       .select('id, title, platform, created_at, updated_at')
       .eq('user_id', userId)
@@ -29,7 +30,8 @@ export async function createConversation(req, res) {
     const userId = req.user.id;
     const { platform } = req.body;
 
-    const { data, error } = await supabase
+    const db = supabaseAsUser(req.userToken);
+    const { data, error } = await db
       .from('coach_conversations')
       .insert({
         user_id: userId,
@@ -54,8 +56,10 @@ export async function getMessages(req, res) {
     const userId = req.user.id;
     const { conversationId } = req.params;
 
+    const db = supabaseAsUser(req.userToken);
+
     // Verify ownership
-    const { data: conv, error: convError } = await supabase
+    const { data: conv, error: convError } = await db
       .from('coach_conversations')
       .select('id')
       .eq('id', conversationId)
@@ -66,7 +70,7 @@ export async function getMessages(req, res) {
       return res.status(404).json({ success: false, error: 'Conversation not found' });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('coach_messages')
       .select('id, role, content, context_used, created_at')
       .eq('conversation_id', conversationId)
@@ -87,7 +91,8 @@ export async function deleteConversation(req, res) {
     const userId = req.user.id;
     const { conversationId } = req.params;
 
-    const { error } = await supabase
+    const db = supabaseAsUser(req.userToken);
+    const { error } = await db
       .from('coach_conversations')
       .delete()
       .eq('id', conversationId)

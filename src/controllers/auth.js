@@ -1,4 +1,4 @@
-import { supabase } from '../services/supabase.js';
+import { supabase, supabaseAsUser } from '../services/supabase.js';
 
 // Sign up new user
 export async function signUp(req, res) {
@@ -171,7 +171,10 @@ export async function updateProfile(req, res) {
       });
     }
 
-    const { data, error } = await supabase
+    // Run as the user so RLS on profiles is the final gate, not just our
+    // .eq('user_id', userId) filter.
+    const db = supabaseAsUser(req.userToken);
+    const { data, error } = await db
       .from('profiles')
       .update(updates)
       .eq('user_id', userId)

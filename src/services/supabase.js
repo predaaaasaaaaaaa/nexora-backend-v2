@@ -3,27 +3,34 @@ dotenv.config();
 
 import { createClient } from '@supabase/supabase-js';
 
-// DEBUG: Check if Supabase env vars are loading
-console.log('🔍 DEBUG - Supabase Environment Variables:');
-console.log('  - SUPABASE_URL exists:', !!process.env.SUPABASE_URL);
-console.log('  - SUPABASE_URL value:', process.env.SUPABASE_URL);
-console.log('  - SUPABASE_SERVICE_KEY exists:', !!process.env.SUPABASE_SERVICE_KEY);
-console.log('  - SUPABASE_SERVICE_KEY first 20 chars:', process.env.SUPABASE_SERVICE_KEY?.substring(0, 20));
-
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ ERROR: Missing Supabase credentials!');
-  console.error('Make sure .env file has:');
-  console.error('SUPABASE_URL=https://...');
-  console.error('SUPABASE_SERVICE_KEY=...');
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('Missing required Supabase env vars (SUPABASE_URL, SUPABASE_SERVICE_KEY)');
   throw new Error('Missing Supabase environment variables');
 }
 
-console.log('✅ Supabase credentials loaded successfully');
+// Service-role client. Bypasses RLS — only use for system operations
+// (webhooks, cron jobs, OAuth callback persistence, lookups that legitimately
+// need to span users). For writes triggered by an authenticated user, prefer
+// supabaseAsUser(jwt) below so RLS policies still apply.
+export const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Per-request Supabase client that authenticates as the calling user.
+// PostgREST will run queries as that user, so RLS policies on profiles,
+// coach_conversations, scheduled_posts, etc. are enforced even if the
+// application code accidentally drops a user_id filter.
+export function supabaseAsUser(jwt) {
+  if (!jwt) throw new Error('supabaseAsUser requires a user JWT');
+  // Anon key is the right choice here: PostgREST decides the role from the
+  // Authorization JWT, not from the apikey.
+  return createClient(supabaseUrl, supabaseAnonKey || supabaseServiceKey, {
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 // Helper function to verify user token
 export async function verifyUser(token) {
