@@ -1,4 +1,5 @@
 import { processAIRequest } from '../services/unifiedAI.js';
+import { incrementUsage } from '../services/subscription.js';
 
 export async function generateIdeas(req, res) {
   try {
@@ -29,7 +30,11 @@ export async function generateIdeas(req, res) {
         count: parseInt(count),
       },
     });
-    
+
+    // Bump the weekly counter only after a successful generation so
+    // failed AI calls don't burn a user's quota.
+    await incrementUsage(userId, 'content_ideas_used');
+
     res.json({
       success: true,
       platform: platform,
@@ -37,12 +42,12 @@ export async function generateIdeas(req, res) {
       ideas: aiResponse.response,
       contextUsed: aiResponse.contextUsed,
     });
-    
+
   } catch (error) {
     console.error('Error generating ideas:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to generate ideas'
     });
   }
 }
@@ -75,19 +80,21 @@ export async function generateAllIdeas(req, res) {
         count: parseInt(count),
       },
     });
-    
+
+    await incrementUsage(userId, 'content_ideas_used');
+
     res.json({
       success: true,
       niche: isUserNiche ? "My Niche (Fitness & Health)" : niche,
       ideas: aiResponse.response,
       contextUsed: aiResponse.contextUsed,
     });
-    
+
   } catch (error) {
     console.error('Error generating all ideas:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to generate ideas'
     });
   }
 }

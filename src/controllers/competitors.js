@@ -1,4 +1,5 @@
 import { searchCompetitors, analyzeCompetitor, compareWithUser, saveTrackedCompetitor, getTrackedCompetitors, removeTrackedCompetitor } from '../services/competitors.js';
+import { incrementUsage } from '../services/subscription.js';
 
 // Search for competitor channels
 export async function search(req, res) {
@@ -55,6 +56,10 @@ export async function track(req, res) {
       channel_id, name, handle, thumbnail, subscribers, total_views, total_videos,
     });
 
+    // Keep usage_tracking.competitors_tracked in sync so the plan limit
+    // (3 on Pro, 10 on Max) can actually be enforced.
+    await incrementUsage(userId, 'competitors_tracked');
+
     res.json({ success: true, data: tracked });
   } catch (error) {
     console.error('Error tracking competitor:', error);
@@ -81,6 +86,7 @@ export async function untrack(req, res) {
     const { channelId } = req.params;
 
     await removeTrackedCompetitor(userId, channelId);
+    await incrementUsage(userId, 'competitors_tracked', -1);
     res.json({ success: true });
   } catch (error) {
     console.error('Error removing competitor:', error);

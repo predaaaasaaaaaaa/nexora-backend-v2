@@ -96,14 +96,29 @@ export async function getUsage(userId) {
   return data;
 }
 
+// Allowlist the columns we'll touch so a caller bug can't write into
+// arbitrary fields on usage_tracking.
+const USAGE_FIELDS = new Set([
+  'coach_messages_used',
+  'content_ideas_used',
+  'competitors_tracked',
+]);
+
 export async function incrementUsage(userId, field, amount = 1) {
+  if (!USAGE_FIELDS.has(field)) {
+    console.error(`incrementUsage: refusing unknown field "${field}"`);
+    return null;
+  }
+
   const usage = await getUsage(userId);
   if (!usage) return null;
+
+  const next = Math.max(0, (usage[field] || 0) + amount);
 
   const { data, error } = await supabase
     .from('usage_tracking')
     .update({
-      [field]: usage[field] + amount,
+      [field]: next,
       updated_at: new Date().toISOString(),
     })
     .eq('id', usage.id)
