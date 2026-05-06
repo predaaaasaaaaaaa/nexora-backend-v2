@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { google } from 'googleapis';
 import { supabase } from './supabase.js';
+import { encryptToken, decryptToken } from '../utils/tokenCrypto.js';
 
 // Create OAuth2 client
 function createOAuth2Client() {
@@ -99,8 +100,8 @@ export async function handleCallback(code, userId) {
     .upsert({
       user_id: userId,
       platform: 'youtube',
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
+      access_token: encryptToken(tokens.access_token),
+      refresh_token: encryptToken(tokens.refresh_token),
       token_expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
       platform_user_id: channel.id,
       platform_username: channel.snippet.title,
@@ -134,14 +135,17 @@ async function getAuthenticatedClient(userId) {
 
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({
-    access_token: data.access_token,
-    refresh_token: data.refresh_token,
+    access_token: decryptToken(data.access_token),
+    refresh_token: decryptToken(data.refresh_token),
   });
 
   oauth2Client.on('tokens', async (newTokens) => {
-    const updates = { access_token: newTokens.access_token };
-    if (newTokens.refresh_token) updates.refresh_token = newTokens.refresh_token;
+    const updates = {};
+    if (newTokens.access_token) updates.access_token = encryptToken(newTokens.access_token);
+    if (newTokens.refresh_token) updates.refresh_token = encryptToken(newTokens.refresh_token);
     if (newTokens.expiry_date) updates.token_expires_at = new Date(newTokens.expiry_date).toISOString();
+
+    if (Object.keys(updates).length === 0) return;
 
     await supabase
       .from('connected_platforms')
