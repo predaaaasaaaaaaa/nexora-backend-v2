@@ -12,8 +12,13 @@ import feedbackRoutes from './routes/feedback.js';
 import youtubeRoutes from './routes/youtube.js';
 import competitorsRoutes from './routes/competitors.js';
 import subscriptionRoutes from './routes/subscription.js';
+import { webhookLimiter } from './middleware/rateLimits.js';
 
 const app = express();
+
+// Trust the platform proxy (Vercel) so rate limiters key on the real
+// client IP from X-Forwarded-For instead of the proxy IP.
+app.set('trust proxy', 1);
 
 // Build the CORS allowlist from the environment so localhost origins
 // never ship to production. Add extra prod origins via CORS_EXTRA_ORIGINS
@@ -45,9 +50,13 @@ app.use(cors({
 
 // Webhook route needs raw body for Paddle signature verification
 // This MUST come BEFORE express.json()
-app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }), (req, res, next) => {
+app.use('/api/subscription/webhook', webhookLimiter, express.raw({ type: 'application/json' }), (req, res, next) => {
   req.rawBody = req.body.toString('utf8');
-  req.body = JSON.parse(req.body);
+  try {
+    req.body = JSON.parse(req.body);
+  } catch {
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
   next();
 });
 

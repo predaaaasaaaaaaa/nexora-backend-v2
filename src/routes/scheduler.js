@@ -11,6 +11,7 @@ import {
 } from '../controllers/scheduler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireFeature } from '../middleware/planEnforcement.js';
+import { aiLimiter, writeLimiter } from '../middleware/rateLimits.js';
 
 const router = express.Router();
 
@@ -21,17 +22,17 @@ router.use(requireAuth);
 router.use(requireFeature('scheduler'));
 
 // AI recommendations
-router.get('/recommendations', getAllSchedules);
-router.post('/recommendations/reactive', getReactiveRecommendations);
+router.get('/recommendations', aiLimiter, getAllSchedules);
+router.post('/recommendations/reactive', aiLimiter, getReactiveRecommendations);
 
 // Scheduled posts CRUD
 router.get('/posts', getScheduledPosts);
-router.post('/posts', createScheduledPost);
-router.put('/posts/:id', updateScheduledPost);
-router.delete('/posts/:id', deleteScheduledPost);
+router.post('/posts', writeLimiter, createScheduledPost);
+router.put('/posts/:id', writeLimiter, updateScheduledPost);
+router.delete('/posts/:id', writeLimiter, deleteScheduledPost);
 
 // Notification preferences
 router.get('/notifications', getNotificationPreferences);
-router.put('/notifications', upsertNotificationPreferences);
+router.put('/notifications', writeLimiter, upsertNotificationPreferences);
 
 export default router;
