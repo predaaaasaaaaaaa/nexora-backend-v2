@@ -134,6 +134,13 @@ async function resolveHandle(youtube, handle) {
   }
 }
 
+// Public wrapper — fetch a single channel's public stats by id, used by
+// the track endpoint so we never trust subscriber/view counts from a client.
+export async function fetchChannelById(channelId) {
+  const youtube = getYouTubeClient();
+  return fetchChannelData(youtube, channelId);
+}
+
 // Fetch basic channel data
 async function fetchChannelData(youtube, channelId) {
   try {

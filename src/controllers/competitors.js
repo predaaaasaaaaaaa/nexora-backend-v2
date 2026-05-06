@@ -1,4 +1,4 @@
-import { searchCompetitors, analyzeCompetitor, compareWithUser, saveTrackedCompetitor, getTrackedCompetitors, removeTrackedCompetitor } from '../services/competitors.js';
+import { searchCompetitors, analyzeCompetitor, compareWithUser, saveTrackedCompetitor, getTrackedCompetitors, removeTrackedCompetitor, fetchChannelById } from '../services/competitors.js';
 import { incrementUsage } from '../services/subscription.js';
 
 // Search for competitor channels
@@ -48,12 +48,29 @@ export async function compare(req, res) {
 export async function track(req, res) {
   try {
     const userId = req.user.id;
-    const { channel_id, name, handle, thumbnail, subscribers, total_views, total_videos } = req.body;
+    const { channel_id } = req.body;
 
-    if (!channel_id || !name) return res.status(400).json({ success: false, error: 'Channel data is required' });
+    if (!channel_id || typeof channel_id !== 'string') {
+      return res.status(400).json({ success: false, error: 'channel_id is required' });
+    }
+
+    // Always source the public channel snapshot from YouTube. Trusting
+    // subscriber/view counts from the request body let any client write
+    // arbitrary numbers into tracked_competitors, which then flowed into
+    // the AI's competitor comparisons and the user's UI.
+    const channel = await fetchChannelById(channel_id);
+    if (!channel) {
+      return res.status(404).json({ success: false, error: 'Channel not found' });
+    }
 
     const tracked = await saveTrackedCompetitor(userId, {
-      channel_id, name, handle, thumbnail, subscribers, total_views, total_videos,
+      channel_id: channel.channel_id,
+      name: channel.name,
+      handle: channel.handle,
+      thumbnail: channel.thumbnail,
+      subscribers: channel.subscribers,
+      total_views: channel.total_views,
+      total_videos: channel.total_videos,
     });
 
     // Keep usage_tracking.competitors_tracked in sync so the plan limit
