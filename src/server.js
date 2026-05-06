@@ -33,23 +33,26 @@ app.use(helmet({
 // never ship to production. Add extra prod origins via CORS_EXTRA_ORIGINS
 // (comma-separated) without code changes.
 const PROD_ORIGINS = ['https://nexora-ai.org', 'https://www.nexora-ai.org'];
-const DEV_ORIGINS = ['http://localhost:3000', 'http://localhost:5173'];
 const extraOrigins = (process.env.CORS_EXTRA_ORIGINS || '')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 
-const allowedOrigins = new Set([
-  ...PROD_ORIGINS,
-  ...(process.env.NODE_ENV === 'production' ? [] : DEV_ORIGINS),
-  ...extraOrigins,
-]);
+const isProd = process.env.NODE_ENV === 'production';
+const allowedOrigins = new Set([...PROD_ORIGINS, ...extraOrigins]);
+
+// In dev, accept any http://localhost or http://127.0.0.1 port — Next
+// shuffles to 3001/3002 when 3000 is busy, and our CORS check shouldn't
+// be the thing that breaks the workflow. In prod this regex is never
+// consulted.
+const DEV_LOCALHOST_RE = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
 app.use(cors({
   origin(origin, cb) {
     // Allow non-browser requests (curl, server-to-server) which omit Origin.
     if (!origin) return cb(null, true);
     if (allowedOrigins.has(origin)) return cb(null, true);
+    if (!isProd && DEV_LOCALHOST_RE.test(origin)) return cb(null, true);
     return cb(new Error('Origin not allowed by CORS'));
   },
   credentials: true,
