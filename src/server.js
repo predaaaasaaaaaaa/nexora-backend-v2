@@ -15,13 +15,29 @@ import subscriptionRoutes from './routes/subscription.js';
 
 const app = express();
 
+// Build the CORS allowlist from the environment so localhost origins
+// never ship to production. Add extra prod origins via CORS_EXTRA_ORIGINS
+// (comma-separated) without code changes.
+const PROD_ORIGINS = ['https://nexora-ai.org', 'https://www.nexora-ai.org'];
+const DEV_ORIGINS = ['http://localhost:3000', 'http://localhost:5173'];
+const extraOrigins = (process.env.CORS_EXTRA_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+const allowedOrigins = new Set([
+  ...PROD_ORIGINS,
+  ...(process.env.NODE_ENV === 'production' ? [] : DEV_ORIGINS),
+  ...extraOrigins,
+]);
+
 app.use(cors({
-  origin: [
-    'https://nexora-ai.org',
-    'https://www.nexora-ai.org',
-    'http://localhost:3000',
-    'http://localhost:5173',
-  ],
+  origin(origin, cb) {
+    // Allow non-browser requests (curl, server-to-server) which omit Origin.
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.has(origin)) return cb(null, true);
+    return cb(new Error('Origin not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
