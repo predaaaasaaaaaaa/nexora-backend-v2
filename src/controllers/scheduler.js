@@ -43,7 +43,7 @@ Rules:
 
   } catch (error) {
     console.error('Error getting schedules:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to load recommendations' });
   }
 }
 
@@ -100,7 +100,7 @@ Respond in MAX 2-3 bullet points, each 1 sentence. Rules:
 
   } catch (error) {
     console.error('Error getting reactive recommendations:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to load recommendations' });
   }
 }
 
@@ -150,7 +150,7 @@ export async function getScheduledPosts(req, res) {
 
   } catch (error) {
     console.error('Error fetching scheduled posts:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to load scheduled posts' });
   }
 }
 
@@ -312,7 +312,7 @@ export async function getNotificationPreferences(req, res) {
 
   } catch (error) {
     console.error('Error fetching notification prefs:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to load notification preferences' });
   }
 }
 
@@ -354,6 +354,6 @@ export async function upsertNotificationPreferences(req, res) {
 
   } catch (error) {
     console.error('Error updating notification prefs:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Failed to update notification preferences' });
   }
 }

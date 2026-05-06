@@ -46,7 +46,7 @@ export async function getAnalyticsByPlatform(req, res) {
     console.error('Error fetching analytics:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to load analytics'
     });
   }
 }
@@ -103,7 +103,7 @@ export async function getCombinedAnalytics(req, res) {
     console.error('Error fetching combined analytics:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to load analytics'
     });
   }
 }

@@ -37,7 +37,7 @@ export async function submitFeedback(req, res) {
     console.error('Error submitting feedback:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to submit feedback'
     });
   }
 }

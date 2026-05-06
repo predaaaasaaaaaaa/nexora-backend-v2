@@ -46,7 +46,7 @@ export async function signUp(req, res) {
     console.error('Signup error:', error);
     res.status(400).json({
       success: false,
-      error: error.message
+      error: 'Signup failed'
     });
   }
 }
@@ -136,7 +136,7 @@ export async function getProfile(req, res) {
     console.error('Get profile error:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Failed to load profile'
     });
   }
 }

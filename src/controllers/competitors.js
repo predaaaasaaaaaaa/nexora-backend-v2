@@ -40,7 +40,7 @@ export async function compare(req, res) {
     res.json({ success: true, data: comparison });
   } catch (error) {
     console.error('Error comparing channels:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to compare channels' });
+    res.status(500).json({ success: false, error: 'Failed to compare channels' });
   }
 }
 
