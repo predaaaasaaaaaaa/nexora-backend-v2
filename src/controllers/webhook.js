@@ -163,7 +163,12 @@ export async function handleWebhook(req, res) {
     if (!userId) {
       console.error('Webhook: Could not find user for event:', eventType);
       await logSubscriptionEvent(eventType, payload, null, null);
-      return res.status(200).json({ received: true, warning: 'User not found' });
+      // Reply 4xx so Paddle retries. Returning 200 here used to make
+      // Paddle treat the event as delivered, silently dropping plan
+      // changes on the floor when the user mapping was temporarily
+      // unavailable (e.g. a brand-new subscription with custom_data
+      // racing the row insert).
+      return res.status(409).json({ error: 'User mapping not found yet' });
     }
 
     const priceId = getPriceId(payload);
