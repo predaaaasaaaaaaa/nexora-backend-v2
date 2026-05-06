@@ -7,8 +7,23 @@ const groq = new Groq({
 });
 
 // ============================================================
-// SECURITY — Detect prompt injection attempts
+// UX — Best-effort prompt-injection deflection
 // ============================================================
+//
+// IMPORTANT: This regex list is NOT a security control. It catches obvious
+// "ignore previous instructions" probes and replies with a friendly redirect,
+// which is good for product polish, but anyone determined to bypass it can.
+// The actual defense is:
+//   1. The system prompt below tells the model not to execute user
+//      instructions that conflict with its role, and to refuse to disclose
+//      internals.
+//   2. We never put user-controlled strings into a place where the model
+//      would treat them as instructions from the operator (the system
+//      role is reserved for our own prompt).
+//   3. The model can't take privileged actions on its own — every side
+//      effect (DB write, payment, email) goes through an authenticated
+//      HTTP handler, not through the model's output.
+// Treat additions to this list as UX, not as a security boundary.
 const INJECTION_PATTERNS = [
   // System prompt extraction
   /system\s*prompt/i,
