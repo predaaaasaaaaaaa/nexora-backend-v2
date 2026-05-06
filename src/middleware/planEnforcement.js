@@ -58,8 +58,12 @@ export function requirePlan(action) {
 
     } catch (error) {
       console.error('Plan enforcement error:', error);
-      // Fail open — don't block users if the check fails
-      next();
+      // Fail closed — refuse the request rather than silently bypass the limit.
+      return res.status(503).json({
+        success: false,
+        error: 'plan_check_failed',
+        message: 'Could not verify your plan. Please try again shortly.',
+      });
     }
   };
 }
@@ -95,7 +99,12 @@ export function requireFeature(feature) {
 
     } catch (error) {
       console.error('Feature check error:', error);
-      next();
+      // Fail closed — gating a paid feature must never silently allow access.
+      return res.status(503).json({
+        success: false,
+        error: 'feature_check_failed',
+        message: 'Could not verify your plan. Please try again shortly.',
+      });
     }
   };
 }
