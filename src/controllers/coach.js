@@ -335,8 +335,22 @@ export async function chatWithCoach(req, res) {
 
     let activeConversationId = conversationId;
 
-    // If no conversation provided, create one
-    if (!activeConversationId) {
+    // If a conversationId was supplied, prove the caller owns it before
+    // writing into it. Without this check any user could inject messages
+    // into another user's conversation and overwrite its title.
+    if (activeConversationId) {
+      const { data: ownedConv, error: ownErr } = await supabase
+        .from('coach_conversations')
+        .select('id')
+        .eq('id', activeConversationId)
+        .eq('user_id', userId)
+        .single();
+
+      if (ownErr || !ownedConv) {
+        return res.status(404).json({ success: false, error: 'Conversation not found' });
+      }
+    } else {
+      // If no conversation provided, create one
       const { data: newConv, error: createError } = await supabase
         .from('coach_conversations')
         .insert({
