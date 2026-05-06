@@ -331,7 +331,12 @@ function formatSearchResultsForAI(results) {
 // ============================================================
 export async function chatWithCoach(req, res) {
   try {
-    const { message, platform, conversationId, niche, analytics } = req.body;
+    // Only `message`, `platform` and `conversationId` are honored from the
+    // body. `niche` and `analytics` used to be passed in too — but the AI
+    // already pulls real niche/analytics through getUserContext(userId), so
+    // letting the client supply them just lets a malicious client poison
+    // the AI's view of itself.
+    const { message, platform, conversationId } = req.body;
     const userId = req.user.id;
 
     if (!message) {
@@ -404,14 +409,14 @@ export async function chatWithCoach(req, res) {
       }
     }
 
-    // Get AI response — pass competitor context + chat history
+    // Get AI response — pass competitor context + chat history. niche and
+    // analytics come from getUserContext inside processAIRequest, not from
+    // the client.
     const response = await processAIRequest(userId, {
       task: 'coach',
       message: message,
       platform: platform || 'youtube',
       additionalContext: {
-        niche,
-        analytics,
         competitorData: competitorContext,
         chatHistory: recentChatMessages,
       },
