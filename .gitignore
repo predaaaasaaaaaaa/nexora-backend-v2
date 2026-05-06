@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 node_modules/
 .env
 .env.local
@@ -20,28 +19,3 @@ test-*.js
 
 # Vercel
 .vercel
-
-=======
-node_modules/
-.env
-.env.local
-.DS_Store
-*.log
-dist/
-build/
-coverage/
-.nyc_output/
-.cache/
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Test files (exclude from production)
-test-*.js
-
-# Vercel
-.vercel
-
->>>>>>> 5a44428052f69c23cf36edb825632f5bf40359e3

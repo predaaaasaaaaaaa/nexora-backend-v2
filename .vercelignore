@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 node_modules
 .env
 .env.local
@@ -8,16 +7,3 @@ database-migrations.sql
 unified-ai-migrations.sql
 .git
 .gitignore
-
-=======
-node_modules
-.env
-.env.local
-test-*.js
-*.md
-database-migrations.sql
-unified-ai-migrations.sql
-.git
-.gitignore
-
->>>>>>> 5a44428052f69c23cf36edb825632f5bf40359e3
