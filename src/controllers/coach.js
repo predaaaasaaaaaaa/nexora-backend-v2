@@ -384,14 +384,9 @@ export async function chatWithCoach(req, res) {
       activeConversationId = newConv.id;
     }
 
-    // Save user message
-    await supabase.from('coach_messages').insert({
-      conversation_id: activeConversationId,
-      role: 'user',
-      content: message,
-    });
-
     // ---- LOAD RECENT CHAT MESSAGES FOR CONTEXT ----
+    // Loaded before we save the new user message so the AI gets the prior
+    // exchange, not its own input echoed back.
     let recentChatMessages = [];
     if (activeConversationId) {
       const { data: recentMsgs } = await supabase
@@ -400,7 +395,7 @@ export async function chatWithCoach(req, res) {
         .eq('conversation_id', activeConversationId)
         .order('created_at', { ascending: false })
         .limit(6);
-      
+
       if (recentMsgs) {
         recentChatMessages = recentMsgs.reverse();
       }
@@ -431,13 +426,19 @@ export async function chatWithCoach(req, res) {
       },
     });
 
-    // Save assistant message
-    await supabase.from('coach_messages').insert({
-      conversation_id: activeConversationId,
-      role: 'assistant',
-      content: response.response,
-      context_used: response.contextUsed || null,
-    });
+    // Persist both messages only after the AI call returned. Saving the
+    // user message before the call left orphan rows when the model failed,
+    // and let a quota-blocked user pile messages into the conversation
+    // log that no assistant ever answered.
+    await supabase.from('coach_messages').insert([
+      { conversation_id: activeConversationId, role: 'user', content: message },
+      {
+        conversation_id: activeConversationId,
+        role: 'assistant',
+        content: response.response,
+        context_used: response.contextUsed || null,
+      },
+    ]);
 
     // Auto-title: use first user message as title (trimmed)
     if (!conversationId) {

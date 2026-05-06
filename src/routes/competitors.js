@@ -10,10 +10,12 @@ const router = express.Router();
 // Search for competitors
 router.get('/search', requireAuth, externalApiLimiter, requireFeature('competitor'), search);
 
-// Deep analyze a channel
+// Deep analyze a channel. requireFeature('competitor') blocks Free users
+// (limit 0) and the externalApiLimiter caps Pro/Max bursts so a single
+// account can't drain the daily YouTube quota.
 router.get('/analyze/:channelId', requireAuth, externalApiLimiter, requireFeature('competitor'), analyze);
 
-// Compare competitor with user's channel
+// Compare competitor with user's channel — same reasoning.
 router.get('/compare/:channelId', requireAuth, externalApiLimiter, requireFeature('competitor'), compare);
 
 // Track/untrack competitors — tracking checks the competitor limit

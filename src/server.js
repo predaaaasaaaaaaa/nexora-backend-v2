@@ -3,6 +3,7 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import authRoutes from './routes/auth.js';
 import coachRoutes from './routes/coach.js';
 import analyticsRoutes from './routes/analytics.js';
@@ -19,6 +20,14 @@ const app = express();
 // Trust the platform proxy (Vercel) so rate limiters key on the real
 // client IP from X-Forwarded-For instead of the proxy IP.
 app.set('trust proxy', 1);
+
+// Security headers. We're a JSON API with no rendered HTML, so the
+// permissive default CSP is fine; HSTS / nosniff / frame-deny are the
+// useful ones.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 // Build the CORS allowlist from the environment so localhost origins
 // never ship to production. Add extra prod origins via CORS_EXTRA_ORIGINS

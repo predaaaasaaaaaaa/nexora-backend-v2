@@ -20,17 +20,20 @@ export async function signUp(req, res) {
     
     if (error) throw error;
     
-    // Create user profile
+    // Create user profile. Use the email Supabase Auth actually accepted,
+    // not the raw request body — this prevents drift if Supabase normalizes
+    // the address and avoids future tricks where someone manages to create
+    // an auth user with one email but a profile.email pointing elsewhere.
     if (data.user) {
       const { error: profileError } = await supabase.from('profiles').insert({
         user_id: data.user.id,
-        email: email,
+        email: data.user.email,
         username: username || null,
         niche: 'general',
         goals: [],
         created_at: new Date().toISOString(),
       });
-      
+
       if (profileError) {
         console.error('Error creating profile:', profileError);
       }
