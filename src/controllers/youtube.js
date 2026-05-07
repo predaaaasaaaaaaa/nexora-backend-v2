@@ -9,18 +9,27 @@ import {
   } from '../services/youtube.js';
 
   // Resolve the URL to redirect the user back to after the OAuth round trip.
-  // Production sets FRONTEND_URL explicitly. In dev we infer from the
-  // request's own host so a localhost OAuth never bounces the user to
-  // production (where they have no session).
+  //
+  // Localhost requests ALWAYS go to a localhost frontend, even if
+  // FRONTEND_URL is set to prod — otherwise a dev OAuth bounces the user
+  // to production where they have no session. This is the inverse of the
+  // earlier ordering, which got bitten by .env having a prod URL.
+  //
+  // Non-localhost requests honor FRONTEND_URL when set, and fall back to
+  // the prod domain only as a last resort.
   function resolveFrontend(req) {
-    if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/$/, '');
-    const host = req.headers['x-forwarded-host'] || req.get('host');
-    if (host && /(localhost|127\.0\.0\.1)/.test(host)) {
+    const host = req.headers['x-forwarded-host'] || req.get('host') || '';
+    const hostStr = String(host);
+    const isLocalhost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(hostStr);
+
+    if (isLocalhost) {
+      const hostname = hostStr.split(':')[0];
       // Frontend dev server is conventionally on a different port than the
       // API. Default to :3000.
-      const hostname = String(host).split(':')[0];
       return `http://${hostname}:3000`;
     }
+
+    if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/$/, '');
     return 'https://nexora-ai.org';
   }
   
