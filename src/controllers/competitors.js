@@ -1,5 +1,26 @@
 import { searchCompetitors, analyzeCompetitor, compareWithUser, saveTrackedCompetitor, getTrackedCompetitors, removeTrackedCompetitor, fetchChannelById } from '../services/competitors.js';
-import { incrementUsage } from '../services/subscription.js';
+import { incrementUsage, consumeYouTubeQuota, YouTubeQuotaExceededError } from '../services/subscription.js';
+
+// Approximate YouTube API quota cost per operation. Source:
+// https://developers.google.com/youtube/v3/determine_quota_cost
+// search.list = 100, channels.list = 1, playlistItems.list = 1,
+// videos.list = 1, youtubeAnalytics.reports.query = 1.
+const QUOTA_COST = {
+  search:  101,   // search.list (100) + channels.list batch (1)
+  analyze:   3,   // channels.list (1) + playlistItems.list (1) + videos batch (1)
+  compare:  10,   // 2× analyze + ~4 analytics queries
+  track:     1,   // single channels.list
+};
+
+function quotaErrorResponse(res, err) {
+  return res.status(429).json({
+    success: false,
+    error: 'youtube_quota_exhausted',
+    message: 'You\'ve used your monthly YouTube research quota for this plan. Upgrade or wait until next month.',
+    used: err.used,
+    limit: err.limit,
+  });
+}
 
 // Search for competitor channels
 export async function search(req, res) {
@@ -7,9 +28,12 @@ export async function search(req, res) {
     const { query } = req.query;
     if (!query) return res.status(400).json({ success: false, error: 'Search query is required' });
 
+    await consumeYouTubeQuota(req.user.id, req.userPlan || 'free', QUOTA_COST.search);
+
     const results = await searchCompetitors(query, 5);
     res.json({ success: true, results });
   } catch (error) {
+    if (error instanceof YouTubeQuotaExceededError) return quotaErrorResponse(res, error);
     console.error('Error searching competitors:', error);
     res.status(500).json({ success: false, error: 'Failed to search competitors' });
   }
@@ -21,9 +45,12 @@ export async function analyze(req, res) {
     const { channelId } = req.params;
     if (!channelId) return res.status(400).json({ success: false, error: 'Channel ID is required' });
 
+    await consumeYouTubeQuota(req.user.id, req.userPlan || 'free', QUOTA_COST.analyze);
+
     const analysis = await analyzeCompetitor(channelId);
     res.json({ success: true, data: analysis });
   } catch (error) {
+    if (error instanceof YouTubeQuotaExceededError) return quotaErrorResponse(res, error);
     console.error('Error analyzing competitor:', error);
     res.status(500).json({ success: false, error: 'Failed to analyze competitor' });
   }
@@ -36,9 +63,12 @@ export async function compare(req, res) {
     const { channelId } = req.params;
     if (!channelId) return res.status(400).json({ success: false, error: 'Channel ID is required' });
 
+    await consumeYouTubeQuota(userId, req.userPlan || 'free', QUOTA_COST.compare);
+
     const comparison = await compareWithUser(userId, channelId);
     res.json({ success: true, data: comparison });
   } catch (error) {
+    if (error instanceof YouTubeQuotaExceededError) return quotaErrorResponse(res, error);
     console.error('Error comparing channels:', error);
     res.status(500).json({ success: false, error: 'Failed to compare channels' });
   }

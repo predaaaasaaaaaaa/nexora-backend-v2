@@ -6,6 +6,11 @@
 import { supabase } from './supabase.js';
 
 // ─── Plan Configuration ───────────────────────────────
+//
+// youtubeApiUnitsPerMonth — caps per-user YouTube quota use (search,
+// analyze, compare). Sized so all paying users together stay well under
+// the project's 10k/day default. Tune via env if you raise the
+// project quota at Google.
 export const PLANS = {
   free: {
     name: 'Free',
@@ -17,6 +22,7 @@ export const PLANS = {
       hasScheduler: false,
       hasConversationHistory: false,
       dashboardDays: 7,
+      youtubeApiUnitsPerMonth: 0,
     },
   },
   pro: {
@@ -29,6 +35,7 @@ export const PLANS = {
       hasScheduler: true,
       hasConversationHistory: true,
       dashboardDays: 90,
+      youtubeApiUnitsPerMonth: parseInt(process.env.YT_QUOTA_PRO || '2000', 10),
     },
   },
   max: {
@@ -41,9 +48,56 @@ export const PLANS = {
       hasScheduler: true,
       hasConversationHistory: true,
       dashboardDays: 3650,
+      youtubeApiUnitsPerMonth: parseInt(process.env.YT_QUOTA_MAX || '10000', 10),
     },
   },
 };
+
+// ─── YouTube quota helper ───────────────────────────────────────
+//
+// Atomic check-and-increment via the existing RPC, sized in YouTube
+// API "units" (per https://developers.google.com/youtube/v3/determine_quota_cost).
+// Returns true if the call is allowed; throws YouTubeQuotaExceededError
+// otherwise so the caller can return a clean 429.
+export class YouTubeQuotaExceededError extends Error {
+  constructor(used, limit) {
+    super(`YouTube quota for this user exhausted (${used}/${limit} units used this month)`);
+    this.name = 'YouTubeQuotaExceededError';
+    this.used = used;
+    this.limit = limit;
+  }
+}
+
+export async function consumeYouTubeQuota(userId, plan, units) {
+  const limits = getPlanLimits(plan);
+  const limit = limits.youtubeApiUnitsPerMonth || 0;
+  if (limit <= 0) {
+    throw new YouTubeQuotaExceededError(0, 0);
+  }
+
+  const periodStart = new Date();
+  periodStart.setUTCDate(1);
+  periodStart.setUTCHours(0, 0, 0, 0);
+  const periodStr = periodStart.toISOString().split('T')[0];
+
+  const { data, error } = await supabase.rpc('check_and_increment_usage', {
+    p_user_id: userId,
+    p_period_start: periodStr,
+    p_field: 'youtube_api_units_used',
+    p_limit: limit,
+    p_amount: units,
+  });
+  if (error) {
+    console.error('consumeYouTubeQuota RPC error:', error);
+    return false; // fail closed
+  }
+  if (!data) {
+    // Get current value for the error message — best-effort.
+    const usage = await getUsage(userId);
+    throw new YouTubeQuotaExceededError(usage?.youtube_api_units_used || 0, limit);
+  }
+  return true;
+}
 
 // Map Paddle price ID to plan name
 export function getPlanFromPriceId(priceId) {
