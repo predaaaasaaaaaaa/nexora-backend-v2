@@ -187,14 +187,32 @@ export async function checkLimit(userId, plan, action) {
   }
 }
 
+// coach_messages has no user_id column — it's joined through
+// coach_conversations.user_id. The previous query .eq('user_id', userId)
+// silently failed with an empty error, so the daily quota was effectively
+// 0/day for everyone. Fix: get the user's conversation IDs first, then
+// count messages in those conversations. Two queries, but each is
+// indexed on (user_id) and (conversation_id, created_at) respectively.
 async function getDailyCoachMessages(userId) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const { data: convs, error: convErr } = await supabase
+    .from('coach_conversations')
+    .select('id')
+    .eq('user_id', userId);
+
+  if (convErr) {
+    console.error('Error loading conversations for quota:', convErr);
+    return 0;
+  }
+  const ids = (convs || []).map(c => c.id);
+  if (ids.length === 0) return 0;
+
   const { count, error } = await supabase
     .from('coach_messages')
     .select('*', { count: 'exact', head: true })
-    .eq('user_id', userId)
+    .in('conversation_id', ids)
     .eq('role', 'user')
     .gte('created_at', today.toISOString());
 
