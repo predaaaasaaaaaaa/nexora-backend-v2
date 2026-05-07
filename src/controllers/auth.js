@@ -110,13 +110,26 @@ export async function signIn(req, res) {
       email,
       password,
     });
-    
+
     if (error) throw error;
-    
+
+    // Don't echo the refresh_token to the response body. The token
+    // would otherwise live in localStorage on the client; on XSS the
+    // refresh token = persistent account access (much worse than a
+    // 1-hour access_token). The frontend uses Supabase JS directly for
+    // sign-in so this endpoint is mostly a fallback — but we still
+    // shouldn't ship long-lived secrets we don't have to.
+    const session = data.session ? {
+      access_token: data.session.access_token,
+      expires_in: data.session.expires_in,
+      expires_at: data.session.expires_at,
+      token_type: data.session.token_type,
+    } : null;
+
     res.json({
       success: true,
       user: data.user,
-      session: data.session,
+      session,
     });
     
   } catch (error) {
