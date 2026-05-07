@@ -75,10 +75,7 @@ export async function consumeYouTubeQuota(userId, plan, units) {
     throw new YouTubeQuotaExceededError(0, 0);
   }
 
-  const periodStart = new Date();
-  periodStart.setUTCDate(1);
-  periodStart.setUTCHours(0, 0, 0, 0);
-  const periodStr = periodStart.toISOString().split('T')[0];
+  const periodStr = utcMonthStartIso();
 
   const { data, error } = await supabase.rpc('check_and_increment_usage', {
     p_user_id: userId,
@@ -141,39 +138,43 @@ export function getEffectivePlan(profile) {
 
 // ─── Usage Tracking ───────────────────────────────────
 
-export async function getUsage(userId) {
-  const periodStart = new Date();
-  periodStart.setDate(1);
-  periodStart.setHours(0, 0, 0, 0);
-  const periodStr = periodStart.toISOString().split('T')[0];
+// Compute the start of the current month in UTC, matching what the
+// Postgres RPCs use (date_trunc('month', NOW())::DATE in a default-UTC
+// session). The previous local-time setDate(1) drifted by a day for
+// any non-UTC server (CET/CEST in dev), causing getUsage to query a
+// row at e.g. '2025-04-30' while the gate wrote to '2025-05-01' —
+// the display ended up reading a different row than the gate enforced.
+function utcMonthStartIso() {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString().split('T')[0];
+}
 
-  let { data, error } = await supabase
+export async function getUsage(userId) {
+  const periodStr = utcMonthStartIso();
+
+  const { data, error } = await supabase
     .from('usage_tracking')
     .select('*')
     .eq('user_id', userId)
     .eq('period_start', periodStr)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    const { data: newData, error: insertError } = await supabase
-      .from('usage_tracking')
-      .upsert({
-        user_id: userId,
-        period_start: periodStr,
-        coach_messages_used: 0,
-        content_ideas_used: 0,
-        competitors_tracked: 0,
-      }, { onConflict: 'user_id,period_start' })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error('Error creating usage record:', insertError);
-      return null;
-    }
-    data = newData;
+  if (error) {
+    console.error('Error reading usage record:', error);
+    return null;
   }
 
+  // Intentionally do NOT auto-create the row from a display read.
+  //   - Display callers (getCurrentPlan, dashboard) just want to show
+  //     "0/3" when there's nothing yet — null is fine, the bucket
+  //     readers handle it.
+  //   - Mutating callers (incrementUsage / check_and_increment_usage)
+  //     create the row inside their own atomic RPC, with the right
+  //     period_start and the right defaults for the new weekly/daily
+  //     columns. Letting THIS function upsert was overwriting those
+  //     gate-managed columns at unpredictable times.
   return data;
 }
 
@@ -192,10 +193,7 @@ export async function incrementUsage(userId, field, amount = 1) {
     return null;
   }
 
-  const periodStart = new Date();
-  periodStart.setUTCDate(1);
-  periodStart.setUTCHours(0, 0, 0, 0);
-  const periodStr = periodStart.toISOString().split('T')[0];
+  const periodStr = utcMonthStartIso();
 
   // Atomic increment via Postgres RPC. Replaces the previous
   // read-modify-write sequence which raced when two requests landed at
