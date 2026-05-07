@@ -224,7 +224,7 @@ export async function checkLimit(userId, plan, action) {
 
   switch (action) {
     case 'coach_message': {
-      const dailyUsed = await getDailyCoachMessages(userId);
+      const dailyUsed = await getDailyCoachMessagesFromBucket(userId);
       const limit = limits.coachMessagesPerDay;
       return {
         allowed: limit === Infinity || dailyUsed < limit,
@@ -234,7 +234,7 @@ export async function checkLimit(userId, plan, action) {
       };
     }
     case 'content_idea': {
-      const weeklyUsed = await getWeeklyContentIdeas(userId);
+      const weeklyUsed = await getWeeklyContentIdeasFromBucket(userId);
       const limit = limits.contentIdeasPerWeek;
       return {
         allowed: limit === Infinity || weeklyUsed < limit,
@@ -268,33 +268,35 @@ export async function checkLimit(userId, plan, action) {
   }
 }
 
-// coach_messages has no user_id column — it's joined through
-// coach_conversations.user_id. PostgREST embedded resource syntax does
-// the join in one round-trip: filter on the embedded table via
-// "<table>.<col>=eq.<val>", select count via head:true.
+// Read from the atomic-bucket columns added in migration v4. These are
+// the SAME counters the gate increments, so the UI and the gate can
+// never disagree (no more "you've used 4/3" weirdness).
 //
-// Costs one DB round-trip per quota check. Was two before this commit.
-async function getDailyCoachMessages(userId) {
+// Returns 0 if the user has no row yet, OR if the stored bucket-start
+// is older than the current period (in which case the next gate call
+// will reset it to 0 anyway, so showing 0 is honest).
+async function getDailyCoachMessagesFromBucket(userId) {
+  const usage = await getUsage(userId);
+  if (!usage) return 0;
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const { count, error } = await supabase
-    .from('coach_messages')
-    .select('id, coach_conversations!inner(user_id)', { count: 'exact', head: true })
-    .eq('coach_conversations.user_id', userId)
-    .eq('role', 'user')
-    .gte('created_at', today.toISOString());
-
-  if (error) {
-    console.error('Error counting daily messages:', error);
-    return 0;
-  }
-  return count || 0;
+  today.setUTCHours(0, 0, 0, 0);
+  const stored = usage.coach_messages_day_start ? new Date(usage.coach_messages_day_start) : null;
+  if (!stored || stored < today) return 0;
+  return usage.coach_messages_day_used || 0;
 }
 
-async function getWeeklyContentIdeas(userId) {
+async function getWeeklyContentIdeasFromBucket(userId) {
   const usage = await getUsage(userId);
-  return usage?.content_ideas_used || 0;
+  if (!usage) return 0;
+  // Compute Monday-of-this-week the same way Postgres date_trunc('week') does.
+  const now = new Date();
+  const day = now.getUTCDay() || 7; // Sunday = 0 → 7
+  const monday = new Date(now);
+  monday.setUTCDate(now.getUTCDate() - (day - 1));
+  monday.setUTCHours(0, 0, 0, 0);
+  const stored = usage.content_ideas_week_start ? new Date(usage.content_ideas_week_start) : null;
+  if (!stored || stored < monday) return 0;
+  return usage.content_ideas_week_used || 0;
 }
 
 // ─── Subscription Management ──────────────────────────

@@ -8,30 +8,30 @@ import { checkLimit, getPlanLimits, getEffectivePlan } from '../services/subscri
 import { supabase } from '../services/supabase.js';
 import { getUserProfile } from '../services/supabase.js';
 
-// Map of metered actions to (limit field, plan-limit key, period strategy).
-// Matches the columns / fields handled in security-migrations-v3.sql.
+// Map of metered actions to (limit field, plan-limit key, period
+// strategy). Each entry is dispatched to the RIGHT atomic RPC at gate
+// time — see callAtomicGate below.
 //
-// "monthly" buckets the period at the first of the month (UTC) — same
-// as usage_tracking.period_start. We only have monthly buckets in the
-// schema today; daily/weekly enforcement layers on top via app code
-// where needed (e.g., coach_message uses daily-from-messages count).
+// Period semantics:
+//   weekly  → check_and_increment_weekly_ideas (resets every Mon UTC)
+//   daily   → check_and_increment_daily_coach (resets at 00:00 UTC)
+//   total   → check_and_increment_usage on a counter column with no
+//             time bucket (lifetime cap; for tracked competitors)
 const METERED = {
-  // Idea generation: weekly limit, persisted via content_ideas_used.
-  // We bucket monthly in usage_tracking and let the limit be the
-  // weekly cap multiplied by ~4 — close enough since the dashboard
-  // also shows a per-week display via the message count. Pragmatic
-  // trade-off: the monthly counter never resets within the period
-  // start, so the limit is effectively monthly here.
+  // Free 3/week, Pro 30/week, Max unlimited.
   content_idea: {
-    field: 'content_ideas_used',
+    period: 'weekly',
     planKey: 'contentIdeasPerWeek',
-    multiplier: 4, // monthly = weekly * 4 (roughly)
   },
-  // Competitor tracking: hard cap (3 Pro, 10 Max). Using the atomic
-  // RPC means parallel "track" calls past the limit are reliably
-  // rejected, and the counter can't drift if one of save/increment
-  // silently fails.
+  // Free 5/day, Pro 15/day, Max unlimited.
+  coach_message: {
+    period: 'daily',
+    planKey: 'coachMessagesPerDay',
+  },
+  // Hard total cap (3 Pro, 10 Max). Parallel "track" calls past the
+  // limit are reliably rejected by the atomic RPC.
   competitor: {
+    period: 'total',
     field: 'competitors_tracked',
     planKey: 'maxCompetitors',
   },
@@ -44,23 +44,43 @@ function isoMonthStart() {
   return d.toISOString().split('T')[0];
 }
 
-// Atomic gate: SELECT ... FOR UPDATE inside a single Postgres function.
-// Returns true when the user is allowed AND the counter has been bumped.
-// Returns false when over limit; in that case the counter is NOT changed.
-async function checkAndIncrementAtomic(userId, field, limit) {
-  // Translate Infinity to -1 so the RPC's "unlimited" sentinel applies.
+// Atomic gate dispatcher. Routes each METERED action to the right
+// Postgres RPC for its period strategy. Each RPC takes a row lock,
+// resets the counter on period rollover (week/day), and increments —
+// all in one transaction. Truly race-proof.
+//
+// Returns true when allowed (and counter bumped), false when over
+// limit (counter NOT bumped), null when the RPC errored (caller fails closed).
+async function callAtomicGate(userId, meta, limit) {
   const lim = limit === Infinity ? -1 : limit;
+
+  if (meta.period === 'weekly') {
+    const { data, error } = await supabase.rpc('check_and_increment_weekly_ideas', {
+      p_user_id: userId,
+      p_limit: lim,
+    });
+    if (error) { console.error('weekly_ideas RPC error:', error); return null; }
+    return Boolean(data);
+  }
+
+  if (meta.period === 'daily') {
+    const { data, error } = await supabase.rpc('check_and_increment_daily_coach', {
+      p_user_id: userId,
+      p_limit: lim,
+    });
+    if (error) { console.error('daily_coach RPC error:', error); return null; }
+    return Boolean(data);
+  }
+
+  // total: hard lifetime cap on a counter column (e.g. competitors_tracked).
   const { data, error } = await supabase.rpc('check_and_increment_usage', {
     p_user_id: userId,
     p_period_start: isoMonthStart(),
-    p_field: field,
+    p_field: meta.field,
     p_limit: lim,
     p_amount: 1,
   });
-  if (error) {
-    console.error('check_and_increment_usage RPC error:', error);
-    return null; // caller treats as "fail closed"
-  }
+  if (error) { console.error('check_and_increment_usage RPC error:', error); return null; }
   return Boolean(data);
 }
 
@@ -86,11 +106,8 @@ export function requirePlan(action) {
       if (meta) {
         const limits = getPlanLimits(plan);
         const rawLimit = limits[meta.planKey];
-        const effectiveLimit = rawLimit === Infinity
-          ? Infinity
-          : (rawLimit * (meta.multiplier || 1));
 
-        const allowed = await checkAndIncrementAtomic(userId, meta.field, effectiveLimit);
+        const allowed = await callAtomicGate(userId, meta, rawLimit);
         if (allowed === null) {
           // RPC failed — fail closed.
           return res.status(503).json({
