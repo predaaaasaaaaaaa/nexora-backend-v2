@@ -82,6 +82,26 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+// Global per-request timeout. A slow Groq call holding a Vercel
+// invocation indefinitely is both a wasted lambda billable second and
+// a DoS vector (one user pinning many invocations). We let webhooks
+// have a longer ceiling because Paddle expects retries on slow 5xx,
+// and skip the timeout entirely for the OAuth callback (Google itself
+// can be slow).
+const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10);
+app.use((req, res, next) => {
+  if (req.path.includes('/youtube/callback')) return next();
+  const limit = req.path.includes('/webhook') ? 60_000 : REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(503).json({ success: false, error: 'request_timeout' });
+    }
+  }, limit);
+  res.on('finish', () => clearTimeout(timer));
+  res.on('close', () => clearTimeout(timer));
+  next();
+});
+
 // Webhook route needs raw body for Paddle signature verification
 // This MUST come BEFORE express.json()
 app.use('/api/subscription/webhook', webhookLimiter, express.raw({ type: 'application/json' }), (req, res, next) => {
