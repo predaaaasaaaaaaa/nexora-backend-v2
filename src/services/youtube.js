@@ -91,8 +91,39 @@ export class YouTubeOAuthError extends Error {
   }
 }
 
-// Exchange auth code for tokens and save them
-export async function handleCallback(code, userId) {
+// Centralized status updater. Never bubbles its own error — a status
+// write failing should not fail the calling request.
+async function updateConnectionStatus(userId, patch) {
+  try {
+    await supabase
+      .from('connected_platforms')
+      .update({ ...patch, last_checked_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('platform', 'youtube');
+  } catch (err) {
+    console.error('updateConnectionStatus error:', err.message);
+  }
+}
+
+// True if a thrown Google error means "this token is dead, user must
+// reconnect". invalid_grant is the canonical signal — Google returns it
+// when a refresh token is revoked, expired beyond recovery, or the user
+// removed our app from their Google permissions.
+function isRevocationError(err) {
+  const msg = String(err?.message || '');
+  if (/invalid_grant/i.test(msg)) return true;
+  if (err?.response?.data?.error === 'invalid_grant') return true;
+  // Some surfaces report this as a 400 with "Token has been expired or revoked".
+  if (/token.*(expired|revoked)/i.test(msg)) return true;
+  return false;
+}
+
+// Exchange auth code for tokens and save them.
+//
+// Allows connections without a YouTube channel: the row is persisted
+// with status='pending_channel' so the user can come back later, create
+// a channel, and finish onboarding without re-doing OAuth.
+export async function handleCallback(code, userId, options = {}) {
   const oauth2Client = createOAuth2Client();
 
   let tokens;
@@ -103,44 +134,63 @@ export async function handleCallback(code, userId) {
   }
   oauth2Client.setCredentials(tokens);
 
-  const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
-  const channelResponse = await youtube.channels.list({
-    part: 'snippet,statistics',
-    mine: true,
-  });
-
-  const channel = channelResponse.data.items?.[0];
-  if (!channel) {
-    throw new YouTubeOAuthError(
-      'no_channel',
-      'This Google account does not have a YouTube channel.'
-    );
+  // Best-effort channel lookup. A missing channel is no longer fatal —
+  // we still persist the grant so we can pick it up later.
+  let channel = null;
+  try {
+    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+    const channelResponse = await youtube.channels.list({
+      part: 'snippet,statistics',
+      mine: true,
+    });
+    channel = channelResponse.data.items?.[0] || null;
+  } catch (err) {
+    // Channel listing failed — treat like no_channel for now; we still
+    // persist the tokens so the user can retry the channel pickup later.
+    console.warn('handleCallback: channels.list failed, marking pending_channel:', err.message);
   }
+
+  // Sanitize the optional user-supplied label. The DB enforces 60 chars
+  // too, but we trim/clean here so a clean string ends up in the row.
+  let connectionLabel = null;
+  if (typeof options.label === 'string') {
+    connectionLabel = options.label.trim().slice(0, 60) || null;
+  }
+
+  const status = channel ? 'active' : 'pending_channel';
+
+  const row = {
+    user_id: userId,
+    platform: 'youtube',
+    access_token: encryptToken(tokens.access_token),
+    refresh_token: encryptToken(tokens.refresh_token),
+    token_expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+    platform_user_id: channel?.id || null,
+    platform_username: channel?.snippet?.title || null,
+    metadata: channel ? {
+      channel_id: channel.id,
+      channel_title: channel.snippet.title,
+      channel_thumbnail: channel.snippet.thumbnails?.default?.url,
+    } : {},
+    status,
+    last_error: null,
+    last_checked_at: new Date().toISOString(),
+  };
+  if (connectionLabel) row.connection_label = connectionLabel;
 
   const { error } = await supabase
     .from('connected_platforms')
-    .upsert({
-      user_id: userId,
-      platform: 'youtube',
-      access_token: encryptToken(tokens.access_token),
-      refresh_token: encryptToken(tokens.refresh_token),
-      token_expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-      platform_user_id: channel.id,
-      platform_username: channel.snippet.title,
-      metadata: {
-        channel_id: channel.id,
-        channel_title: channel.snippet.title,
-        channel_thumbnail: channel.snippet.thumbnails?.default?.url,
-      },
-    }, { onConflict: 'user_id,platform' });
+    .upsert(row, { onConflict: 'user_id,platform' });
 
   if (error) throw error;
 
   return {
     success: true,
-    channel_id: channel.id,
-    channel_title: channel.snippet.title,
-    subscribers: parseInt(channel.statistics.subscriberCount || 0),
+    status,
+    channel_id: channel?.id || null,
+    channel_title: channel?.snippet?.title || null,
+    subscribers: channel ? parseInt(channel.statistics.subscriberCount || 0) : 0,
+    connection_label: connectionLabel,
   };
 }
 
@@ -154,6 +204,10 @@ async function getAuthenticatedClient(userId) {
     .single();
 
   if (error || !data) return null;
+
+  // Refuse to hand out an OAuth client we already know is dead. Caller
+  // should treat null as "not usable" and let the UI prompt reconnect.
+  if (data.status === 'revoked') return null;
 
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({
@@ -569,7 +623,7 @@ export async function getYouTubeAnalytics(userId) {
       console.log('  → topCountries:', audienceAnalytics.topCountries ? `YES (${audienceAnalytics.topCountries.length} countries)` : 'NO');
     }
 
-    return {
+    const result = {
       channel_id: channel.id,
       channel_name: channel.snippet.title,
       channel_thumbnail: channel.snippet.thumbnails?.default?.url,
@@ -610,11 +664,32 @@ export async function getYouTubeAnalytics(userId) {
       audienceAnalytics: audienceAnalytics,
     };
 
+    // Mark active on the way out so a previously-stale connection
+    // self-heals once the underlying issue clears. Fire and forget.
+    if (client.platformData?.status !== 'active') {
+      updateConnectionStatus(userId, { status: 'active', last_error: null });
+    }
+    return result;
+
   } catch (error) {
     console.error('Error fetching YouTube analytics:', error.message);
-    if (error.code === 401 || error.message?.includes('invalid_grant')) {
+    if (error.code === 401 || isRevocationError(error)) {
+      // Mark the connection as revoked so the dashboard / coach can prompt
+      // a reconnect immediately on the next request, instead of silently
+      // returning empty analytics forever.
+      await updateConnectionStatus(userId, {
+        status: 'revoked',
+        last_error: String(error?.message || 'Token revoked').slice(0, 500),
+      });
       return null;
     }
+    // Anything else: leave status alone but record the error string for
+    // ops debugging. Don't throw — keep the user-visible behavior the
+    // same as before this hardening.
+    await updateConnectionStatus(userId, {
+      status: 'stale',
+      last_error: String(error?.message || 'Unknown error').slice(0, 500),
+    });
     throw error;
   }
 }
@@ -683,11 +758,13 @@ function detectContentPatterns(videos, avgViews, longVideos, shorts) {
   return patterns;
 }
 
-// Check if user has YouTube connected
+// Check if user has YouTube connected. Returns the row (with status,
+// label, channel info) when present, null otherwise. Callers that only
+// need a boolean can do `Boolean(await isYouTubeConnected(...))`.
 export async function isYouTubeConnected(userId) {
   const { data } = await supabase
     .from('connected_platforms')
-    .select('platform_username, platform_user_id, connected_at, metadata')
+    .select('platform_username, platform_user_id, connected_at, metadata, status, connection_label, last_checked_at')
     .eq('user_id', userId)
     .eq('platform', 'youtube')
     .single();

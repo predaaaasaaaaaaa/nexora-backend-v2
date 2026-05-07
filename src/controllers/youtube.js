@@ -80,35 +80,59 @@ import {
   export async function getYouTubeData(req, res) {
     try {
       const userId = req.user.id;
-  
-      // Check if connected first
+
       const connected = await isYouTubeConnected(userId);
       if (!connected) {
         return res.json({
           success: true,
           connected: false,
+          status: 'not_connected',
           message: 'YouTube not connected. Connect your account to see real analytics.',
         });
       }
-  
-      // Fetch real analytics
-      const analytics = await getYouTubeAnalytics(userId);
-  
-      if (!analytics) {
+
+      // Honor the persisted lifecycle status so we don't burn quota
+      // calling YouTube for a row we already know is dead/half-set-up.
+      if (connected.status === 'pending_channel') {
         return res.json({
           success: true,
-          connected: false,
-          message: 'YouTube token expired. Please reconnect your account.',
+          connected: true,
+          status: 'pending_channel',
+          message: 'No YouTube channel on this Google account yet. Create one to start tracking analytics.',
+          details: connected,
         });
       }
-  
+      if (connected.status === 'revoked') {
+        return res.json({
+          success: true,
+          connected: true,
+          status: 'revoked',
+          message: 'YouTube access was revoked. Please reconnect your account.',
+          details: connected,
+        });
+      }
+
+      const analytics = await getYouTubeAnalytics(userId);
+
+      if (!analytics) {
+        // getYouTubeAnalytics already updated the row to 'revoked' on
+        // invalid_grant; we mirror that to the client.
+        return res.json({
+          success: true,
+          connected: true,
+          status: 'revoked',
+          message: 'YouTube access was revoked. Please reconnect your account.',
+        });
+      }
+
       res.json({
         success: true,
         connected: true,
+        status: 'active',
         platform: 'youtube',
         data: analytics,
       });
-  
+
     } catch (error) {
       console.error('Error fetching YouTube data:', error);
       res.status(500).json({
@@ -123,13 +147,14 @@ import {
     try {
       const userId = req.user.id;
       const connected = await isYouTubeConnected(userId);
-  
+
       res.json({
         success: true,
         connected: !!connected,
+        status: connected?.status || 'not_connected',
         details: connected || null,
       });
-  
+
     } catch (error) {
       console.error('Error checking YouTube connection:', error);
       res.status(500).json({
