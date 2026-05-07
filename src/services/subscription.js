@@ -58,6 +58,33 @@ export function getPlanLimits(plan) {
   return PLANS[plan]?.limits || PLANS.free.limits;
 }
 
+// Resolve the plan a user currently has *access* to, accounting for
+// cancellation grace and past_due states. Centralized so every gate
+// sees the same semantics.
+//
+// past_due grace: PAST_DUE_GRACE_DAYS (default 3) — after that we treat
+// the user as free. Set to 0 to downgrade immediately on payment failure.
+const PAST_DUE_GRACE_DAYS = parseInt(process.env.PAST_DUE_GRACE_DAYS || '3', 10);
+
+export function getEffectivePlan(profile) {
+  if (!profile) return 'free';
+  const plan = profile.plan || 'free';
+  const status = profile.subscription_status;
+
+  if (status === 'cancelled' && profile.subscription_ends_at) {
+    const endsAt = new Date(profile.subscription_ends_at);
+    return endsAt > new Date() ? plan : 'free';
+  }
+
+  if (status === 'past_due') {
+    const since = profile.updated_at ? new Date(profile.updated_at) : new Date(0);
+    const ageDays = (Date.now() - since.getTime()) / (1000 * 60 * 60 * 24);
+    return ageDays <= PAST_DUE_GRACE_DAYS ? plan : 'free';
+  }
+
+  return plan;
+}
+
 // ─── Usage Tracking ───────────────────────────────────
 
 export async function getUsage(userId) {

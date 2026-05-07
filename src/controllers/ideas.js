@@ -31,9 +31,13 @@ export async function generateIdeas(req, res) {
       },
     });
 
-    // Bump the weekly counter only after a successful generation so
-    // failed AI calls don't burn a user's quota.
-    await incrementUsage(userId, 'content_ideas_used');
+    // The atomic check-and-increment in requirePlan('content_idea')
+    // already bumped the counter, so don't double-bump here. The legacy
+    // path (when the middleware mode falls through to non-atomic) still
+    // needs the bump.
+    if (!req.quotaAlreadyIncremented) {
+      await incrementUsage(userId, 'content_ideas_used');
+    }
 
     res.json({
       success: true,
