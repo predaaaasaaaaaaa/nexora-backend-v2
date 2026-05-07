@@ -61,7 +61,11 @@ export function verifyState(state) {
 // or the database. Strips control chars (which would corrupt logs / mail
 // subjects later), clamps to 60 chars to match the DB CHECK constraint,
 // returns null when nothing useful remains.
-function cleanLabel(raw) {
+//
+// Exported so every caller — getAuthUrl, handleCallback, future label
+// edit endpoints — runs labels through the SAME sanitizer. Don't write
+// a second one.
+export function cleanLabel(raw) {
   if (typeof raw !== 'string') return null;
   // eslint-disable-next-line no-control-regex
   let stripped = "";
@@ -171,12 +175,10 @@ export async function handleCallback(code, userId, options = {}) {
     console.warn('handleCallback: channels.list failed, marking pending_channel:', err.message);
   }
 
-  // Sanitize the optional user-supplied label. The DB enforces 60 chars
-  // too, but we trim/clean here so a clean string ends up in the row.
-  let connectionLabel = null;
-  if (typeof options.label === 'string') {
-    connectionLabel = options.label.trim().slice(0, 60) || null;
-  }
+  // Single chokepoint via cleanLabel — strips control chars too, not
+  // just trim+slice. Important if a future caller passes a label that
+  // didn't go through the OAuth state.
+  const connectionLabel = cleanLabel(options.label);
 
   const status = channel ? 'active' : 'pending_channel';
 
