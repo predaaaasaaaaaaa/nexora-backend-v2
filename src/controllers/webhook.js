@@ -164,15 +164,42 @@ export async function handleWebhook(req, res) {
 
     const payload = req.body;
     const eventType = payload?.event_type;
+    const eventId = payload?.event_id || null;
+    const occurredAt = payload?.occurred_at || null;
 
-    console.log(`🔔 Paddle webhook: ${eventType}`);
+    console.log(`🔔 Paddle webhook: ${eventType} (${eventId})`);
+
+    // ─── H2: idempotency ─────────────────────────────────────
+    // Try to insert the event row first. The unique index on
+    // subscription_events.event_id (migration v3) makes this an atomic
+    // dedupe. If we hit it (Postgres 23505), the event was already
+    // processed — return 200 so Paddle stops retrying.
+    if (eventId) {
+      const seenInsert = await supabase
+        .from('subscription_events')
+        .insert({
+          event_id: eventId,
+          event_type: eventType,
+          payload,
+          paddle_subscription_id: payload?.data?.id || null,
+          paddle_customer_id: payload?.data?.customer_id || null,
+          price_id: payload?.data?.items?.[0]?.price?.id || null,
+        });
+      if (seenInsert.error) {
+        if (seenInsert.error.code === '23505') {
+          console.log(`Webhook: duplicate event_id ${eventId} — skipping side effects`);
+          return res.status(200).json({ received: true, duplicate: true });
+        }
+        // Some other DB error — log but proceed; the event still needs handling.
+        console.error('Webhook: subscription_events insert error', seenInsert.error);
+      }
+    }
 
     // Find the user
     const userId = await findUser(payload);
 
     if (!userId) {
       console.error('Webhook: Could not find user for event:', eventType);
-      await logSubscriptionEvent(eventType, payload, null, null);
       // Reply 4xx so Paddle retries. Returning 200 here used to make
       // Paddle treat the event as delivered, silently dropping plan
       // changes on the floor when the user mapping was temporarily
@@ -181,13 +208,37 @@ export async function handleWebhook(req, res) {
       return res.status(409).json({ error: 'User mapping not found yet' });
     }
 
+    // ─── H3: out-of-order protection ─────────────────────────
+    // Paddle retries can deliver an older event AFTER a newer one
+    // (network timing). Skip events older than the last one we applied
+    // for this user — otherwise a delayed cancel can downgrade a
+    // currently-paying user.
+    if (occurredAt) {
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('paddle_last_event_at')
+        .eq('user_id', userId)
+        .single();
+      const last = prof?.paddle_last_event_at ? new Date(prof.paddle_last_event_at) : null;
+      const thisEvent = new Date(occurredAt);
+      if (last && thisEvent < last) {
+        console.log(`Webhook: skipping ${eventType} (occurred_at ${occurredAt} older than last ${last.toISOString()})`);
+        return res.status(200).json({ received: true, stale: true });
+      }
+    }
+
     const priceId = getPriceId(payload);
     const plan = priceId ? getPlanFromPriceId(priceId) : null;
+
+    // Every successful side-effect also bumps paddle_last_event_at so
+    // older retries get rejected by the H3 guard above.
+    const baseUpdate = occurredAt ? { paddle_last_event_at: occurredAt } : {};
 
     switch (eventType) {
       case 'subscription.created': {
         const status = payload.data.status;
         await updateSubscription(userId, {
+          ...baseUpdate,
           plan,
           subscription_status: status === 'trialing' ? 'trialing' : 'active',
           paddle_subscription_id: String(payload.data.id),
@@ -203,6 +254,7 @@ export async function handleWebhook(req, res) {
         const newPlan = priceId ? getPlanFromPriceId(priceId) : plan;
 
         const updates = {
+          ...baseUpdate,
           plan: newPlan,
           subscription_status: status === 'trialing' ? 'trialing'
             : status === 'active' ? 'active'
@@ -223,6 +275,7 @@ export async function handleWebhook(req, res) {
       case 'subscription.canceled': {
         const endsAt = payload.data.current_billing_period?.ends_at || null;
         await updateSubscription(userId, {
+          ...baseUpdate,
           subscription_status: 'cancelled',
           subscription_ends_at: endsAt,
         });
@@ -232,6 +285,7 @@ export async function handleWebhook(req, res) {
 
       case 'subscription.past_due': {
         await updateSubscription(userId, {
+          ...baseUpdate,
           subscription_status: 'past_due',
         });
         console.log(`⚠️ User ${userId} payment past due`);
@@ -241,6 +295,7 @@ export async function handleWebhook(req, res) {
       case 'transaction.completed': {
         // Payment succeeded — ensure active
         await updateSubscription(userId, {
+          ...baseUpdate,
           subscription_status: 'active',
         });
         console.log(`💰 User ${userId} payment successful`);
@@ -249,6 +304,7 @@ export async function handleWebhook(req, res) {
 
       case 'transaction.payment_failed': {
         await updateSubscription(userId, {
+          ...baseUpdate,
           subscription_status: 'past_due',
         });
         console.log(`⚠️ User ${userId} payment failed`);
@@ -259,7 +315,8 @@ export async function handleWebhook(req, res) {
         console.log(`ℹ️ Unhandled Paddle event: ${eventType}`);
     }
 
-    await logSubscriptionEvent(eventType, payload, userId, plan);
+    // Note: subscription_events insert happened at the top of the handler
+    // for idempotency. We don't double-log here.
     return res.status(200).json({ received: true });
 
   } catch (error) {
