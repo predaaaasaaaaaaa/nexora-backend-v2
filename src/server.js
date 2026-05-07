@@ -17,9 +17,31 @@ import { webhookLimiter } from './middleware/rateLimits.js';
 
 const app = express();
 
-// Trust the platform proxy (Vercel) so rate limiters key on the real
-// client IP from X-Forwarded-For instead of the proxy IP.
-app.set('trust proxy', 1);
+// Trust the platform proxy. Configurable via TRUST_PROXY_HOPS — set to
+// the number of trusted proxies in front of this app:
+//   - Vercel direct: 1
+//   - Vercel + Cloudflare in front: 2
+//   - Override with TRUST_PROXY_HOPS=2
+//
+// Setting this WRONG enables IP spoofing via X-Forwarded-For (an
+// attacker can prepend any IP and bypass per-IP rate limits). Don't
+// guess — confirm by checking logs.
+const TRUST_PROXY_HOPS = parseInt(process.env.TRUST_PROXY_HOPS || '1', 10);
+app.set('trust proxy', TRUST_PROXY_HOPS);
+
+// One-shot warning if X-Forwarded-For is longer than we trust. Catches
+// misconfigured TRUST_PROXY_HOPS in production logs.
+let warnedAboutXFF = false;
+app.use((req, _res, next) => {
+  if (!warnedAboutXFF && req.headers['x-forwarded-for']) {
+    const hops = String(req.headers['x-forwarded-for']).split(',').length;
+    if (hops > TRUST_PROXY_HOPS + 1) {
+      console.warn(`X-Forwarded-For has ${hops} entries but TRUST_PROXY_HOPS=${TRUST_PROXY_HOPS}. Per-IP limits may key on a spoofable address.`);
+      warnedAboutXFF = true;
+    }
+  }
+  next();
+});
 
 // Security headers. We're a JSON API with no rendered HTML, so the
 // permissive default CSP is fine; HSTS / nosniff / frame-deny are the
