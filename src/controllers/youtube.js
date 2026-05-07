@@ -7,6 +7,7 @@ import {
     verifyState,
     YouTubeOAuthError,
   } from '../services/youtube.js';
+  import { invalidateUserContext } from '../services/contextEngine.js';
 
   // Resolve the URL to redirect the user back to after the OAuth round trip.
   //
@@ -75,6 +76,9 @@ import {
       }
 
       const result = await handleCallback(code, verified.userId, { label: verified.label });
+      // Drop any cached context for this user so the dashboard sees the
+      // newly-connected YouTube data on the next request.
+      invalidateUserContext(verified.userId);
 
       // Redirect back to frontend with the typed status so the UI can
       // pick the right banner (success vs "create a channel" nudge).
@@ -185,7 +189,8 @@ import {
     try {
       const userId = req.user.id;
       await disconnectYouTube(userId);
-  
+      invalidateUserContext(userId);
+
       res.json({
         success: true,
         message: 'YouTube disconnected successfully',
