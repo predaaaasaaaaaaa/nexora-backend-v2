@@ -41,8 +41,8 @@ ALTER TABLE connected_platforms
   ADD CONSTRAINT connected_platforms_label_length
   CHECK (connection_label IS NULL OR length(connection_label) <= 60);
 
--- Index status for the cron / dashboard queries that need to find
--- non-active connections quickly. Partial index keeps it small.
+-- Index status for cron / dashboard queries that filter on it.
+-- (The earlier partial-index variant tripped Supabase's SQL editor;
+-- the full index works the same for our query patterns.)
 CREATE INDEX IF NOT EXISTS idx_connected_platforms_status
-  ON connected_platforms(status)
-  WHERE status <> 'active';
+  ON connected_platforms(status);
