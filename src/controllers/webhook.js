@@ -10,6 +10,7 @@ import {
   updateSubscription,
   logSubscriptionEvent,
 } from '../services/subscription.js';
+import { log } from '../utils/logger.js';
 
 // Verify the HMAC-signed user_id we minted server-side at checkout time.
 // custom_data is round-tripped by Paddle, so without a signature the field
@@ -84,7 +85,7 @@ export async function handleWebhook(req, res) {
     // Verify signature
     const signature = req.headers['paddle-signature'];
     if (!signature) {
-      console.error('Webhook: Missing paddle-signature header');
+      log.error('Webhook: Missing paddle-signature header');
       return res.status(401).json({ error: 'Missing signature' });
     }
 
@@ -94,7 +95,7 @@ export async function handleWebhook(req, res) {
     const tsPart = parts.find(p => p.startsWith('ts='));
 
     if (!h1Part || !tsPart) {
-      console.error('Webhook: Invalid signature format');
+      log.error('Webhook: Invalid signature format');
       return res.status(401).json({ error: 'Invalid signature format' });
     }
 
@@ -107,20 +108,20 @@ export async function handleWebhook(req, res) {
     // gives an attacker too much replay window if a payload leaks.
     const tsNum = parseInt(ts, 10);
     if (!tsNum || Math.abs(Date.now() / 1000 - tsNum) > 5 * 60) {
-      console.error('Webhook: ts outside freshness window', { ts });
+      log.error('Webhook: ts outside freshness window', { ts });
       return res.status(401).json({ error: 'Stale webhook' });
     }
 
     // Paddle signs: ts:rawBody
     const rawBody = req.rawBody;
     if (!rawBody) {
-      console.error('Webhook: Missing raw body');
+      log.error('Webhook: Missing raw body');
       return res.status(400).json({ error: 'Missing body' });
     }
 
     const secret = process.env.PADDLE_WEBHOOK_SECRET;
     if (!secret) {
-      console.error('Webhook: PADDLE_WEBHOOK_SECRET not configured');
+      log.error('Webhook: PADDLE_WEBHOOK_SECRET not configured');
       return res.status(500).json({ error: 'Webhook misconfigured' });
     }
     const signedPayload = `${ts}:${rawBody}`;
@@ -137,7 +138,7 @@ export async function handleWebhook(req, res) {
       crypto.timingSafeEqual(expectedBuf, providedBuf);
 
     if (!isValid) {
-      console.error('Webhook: Invalid signature');
+      log.error('Webhook: Invalid signature');
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
@@ -146,7 +147,7 @@ export async function handleWebhook(req, res) {
     const eventId = payload?.event_id || null;
     const occurredAt = payload?.occurred_at || null;
 
-    console.log(`🔔 Paddle webhook: ${eventType} (${eventId})`);
+    log.info(`🔔 Paddle webhook: ${eventType} (${eventId})`);
 
     // ─── H2: idempotency ─────────────────────────────────────
     // Try to insert the event row first. The unique index on
@@ -166,11 +167,11 @@ export async function handleWebhook(req, res) {
         });
       if (seenInsert.error) {
         if (seenInsert.error.code === '23505') {
-          console.log(`Webhook: duplicate event_id ${eventId} — skipping side effects`);
+          log.info(`Webhook: duplicate event_id ${eventId} — skipping side effects`);
           return res.status(200).json({ received: true, duplicate: true });
         }
         // Some other DB error — log but proceed; the event still needs handling.
-        console.error('Webhook: subscription_events insert error', seenInsert.error);
+        log.error('Webhook: subscription_events insert error', seenInsert.error);
       }
     }
 
@@ -178,7 +179,7 @@ export async function handleWebhook(req, res) {
     const userId = await findUser(payload);
 
     if (!userId) {
-      console.error('Webhook: Could not find user for event:', eventType);
+      log.error('Webhook: Could not find user for event:', eventType);
       // Reply 4xx so Paddle retries. Returning 200 here used to make
       // Paddle treat the event as delivered, silently dropping plan
       // changes on the floor when the user mapping was temporarily
@@ -201,7 +202,7 @@ export async function handleWebhook(req, res) {
       const last = prof?.paddle_last_event_at ? new Date(prof.paddle_last_event_at) : null;
       const thisEvent = new Date(occurredAt);
       if (last && thisEvent < last) {
-        console.log(`Webhook: skipping ${eventType} (occurred_at ${occurredAt} older than last ${last.toISOString()})`);
+        log.info(`Webhook: skipping ${eventType} (occurred_at ${occurredAt} older than last ${last.toISOString()})`);
         return res.status(200).json({ received: true, stale: true });
       }
     }
@@ -224,7 +225,7 @@ export async function handleWebhook(req, res) {
           paddle_customer_id: String(payload.data.customer_id),
           plan_activated_at: new Date().toISOString(),
         });
-        console.log(`✅ User ${userId} subscribed to ${plan} (${status})`);
+        log.info(`✅ User ${userId} subscribed to ${plan} (${status})`);
         break;
       }
 
@@ -247,7 +248,7 @@ export async function handleWebhook(req, res) {
         }
 
         await updateSubscription(userId, updates);
-        console.log(`🔄 User ${userId} subscription updated: ${newPlan} (${status})`);
+        log.info(`🔄 User ${userId} subscription updated: ${newPlan} (${status})`);
         break;
       }
 
@@ -258,7 +259,7 @@ export async function handleWebhook(req, res) {
           subscription_status: 'cancelled',
           subscription_ends_at: endsAt,
         });
-        console.log(`❌ User ${userId} cancelled — access until ${endsAt}`);
+        log.info(`❌ User ${userId} cancelled — access until ${endsAt}`);
         break;
       }
 
@@ -267,7 +268,7 @@ export async function handleWebhook(req, res) {
           ...baseUpdate,
           subscription_status: 'past_due',
         });
-        console.log(`⚠️ User ${userId} payment past due`);
+        log.info(`⚠️ User ${userId} payment past due`);
         break;
       }
 
@@ -277,7 +278,7 @@ export async function handleWebhook(req, res) {
           ...baseUpdate,
           subscription_status: 'active',
         });
-        console.log(`💰 User ${userId} payment successful`);
+        log.info(`💰 User ${userId} payment successful`);
         break;
       }
 
@@ -286,12 +287,12 @@ export async function handleWebhook(req, res) {
           ...baseUpdate,
           subscription_status: 'past_due',
         });
-        console.log(`⚠️ User ${userId} payment failed`);
+        log.info(`⚠️ User ${userId} payment failed`);
         break;
       }
 
       default:
-        console.log(`ℹ️ Unhandled Paddle event: ${eventType}`);
+        log.info(`ℹ️ Unhandled Paddle event: ${eventType}`);
     }
 
     // Note: subscription_events insert happened at the top of the handler
@@ -299,7 +300,7 @@ export async function handleWebhook(req, res) {
     return res.status(200).json({ received: true });
 
   } catch (error) {
-    console.error('Webhook error:', error);
+    log.error('Webhook error:', error);
     return res.status(500).json({ error: 'Webhook processing failed' });
   }
 }

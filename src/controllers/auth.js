@@ -1,4 +1,5 @@
 import { supabase, supabaseAsUser } from '../services/supabase.js';
+import { log } from '../utils/logger.js';
 
 // Verify a Cloudflare Turnstile token. Returns true if the token is
 // valid (or if Turnstile isn't configured — dev fallback).
@@ -86,7 +87,7 @@ export async function signUp(req, res) {
     });
     
   } catch (error) {
-    console.error('Signup error:', error);
+    log.error('Signup error:', error);
     res.status(400).json({
       success: false,
       error: 'Signup failed'
@@ -133,7 +134,7 @@ export async function signIn(req, res) {
     });
     
   } catch (error) {
-    console.error('Signin error:', error);
+    log.error('Signin error:', error);
     res.status(401).json({
       success: false,
       error: 'Invalid credentials'
@@ -162,7 +163,7 @@ export async function signOut(req, res) {
     });
 
   } catch (error) {
-    console.error('Signout error:', error);
+    log.error('Signout error:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to sign out'
