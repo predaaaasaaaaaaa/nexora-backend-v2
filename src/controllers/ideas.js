@@ -1,15 +1,42 @@
 import { processAIRequest } from '../services/unifiedAI.js';
 import { incrementUsage } from '../services/subscription.js';
 
+// Bound user-controlled inputs that flow into the AI prompt. Without
+// caps, count=10000000 + a 10MB niche string both pad the input token
+// count we pay Groq for, even though max_tokens caps the output.
+const MAX_IDEAS_COUNT = 50;
+const MIN_IDEAS_COUNT = 1;
+const MAX_NICHE_LEN = 80;
+
+function safeCount(raw) {
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(MAX_IDEAS_COUNT, Math.max(MIN_IDEAS_COUNT, n));
+}
+function safeNiche(raw) {
+  if (typeof raw !== 'string') return null;
+  // Strip ASCII control chars (charCode loop avoids regex-escape
+  // pitfalls). Trim, clamp to MAX_NICHE_LEN.
+  let s = '';
+  for (const ch of raw) {
+    const c = ch.charCodeAt(0);
+    if (c >= 32 && c !== 127) s += ch;
+  }
+  s = s.trim().slice(0, MAX_NICHE_LEN);
+  return s || null;
+}
+
 export async function generateIdeas(req, res) {
   try {
     const { platform } = req.params;
-    const { count = 10, niche } = req.query;
     const userId = req.user.id;
-    
+    const count = safeCount(req.query.count);
+    const rawNiche = safeNiche(req.query.niche);
+
     // Check if using user's own niche
-    const isUserNiche = !niche || niche === "user-niche";
-    
+    const isUserNiche = !rawNiche || rawNiche === 'user-niche';
+    const niche = rawNiche;
+
     // Build message based on niche type
     let message;
     if (isUserNiche) {
@@ -58,12 +85,15 @@ export async function generateIdeas(req, res) {
 
 export async function generateAllIdeas(req, res) {
   try {
-    const { count = 5, niche } = req.query;
     const userId = req.user.id;
-    
+    // Tighter cap on the multi-platform variant (prompt is bigger).
+    const count = Math.min(20, safeCount(req.query.count));
+    const rawNiche = safeNiche(req.query.niche);
+
     // Check if using user's own niche
-    const isUserNiche = !niche || niche === "user-niche";
-    
+    const isUserNiche = !rawNiche || rawNiche === 'user-niche';
+    const niche = rawNiche;
+
     // Build message based on niche type
     let message;
     if (isUserNiche) {
