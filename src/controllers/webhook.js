@@ -69,13 +69,19 @@ async function findUser(payload) {
   return null;
 }
 
-// Extract price ID from subscription items
+// Extract price ID from subscription items.
+//
+// Today every Nexora subscription has exactly one item (one plan, one
+// price). If we ever ship a bundle (e.g., Pro + a one-off add-on),
+// reading items[0] only would silently drop the rest — review every
+// caller before changing this.
 function getPriceId(payload) {
   const items = payload?.data?.items;
-  if (items && items.length > 0) {
-    return items[0].price?.id || items[0].price_id || null;
+  if (!items || items.length === 0) return null;
+  if (items.length > 1) {
+    log.warn(`getPriceId: subscription has ${items.length} items, using only the first`);
   }
-  return null;
+  return items[0].price?.id || items[0].price_id || null;
 }
 
 // ─── Main Webhook Handler ─────────────────────────────
