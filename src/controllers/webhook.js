@@ -122,6 +122,16 @@ export async function handleWebhook(req, res) {
     const ts = tsPart.replace('ts=', '');
     const h1 = h1Part.replace('h1=', '');
 
+    // Reject stale signatures so a captured webhook can't be replayed
+    // hours/days later. Paddle uses Unix seconds; we allow ±5 minutes
+    // of clock skew. Tighter than that breaks on clock drift; looser
+    // gives an attacker too much replay window if a payload leaks.
+    const tsNum = parseInt(ts, 10);
+    if (!tsNum || Math.abs(Date.now() / 1000 - tsNum) > 5 * 60) {
+      console.error('Webhook: ts outside freshness window', { ts });
+      return res.status(401).json({ error: 'Stale webhook' });
+    }
+
     // Paddle signs: ts:rawBody
     const rawBody = req.rawBody;
     if (!rawBody) {
