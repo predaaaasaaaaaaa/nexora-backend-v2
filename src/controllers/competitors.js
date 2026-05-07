@@ -74,13 +74,21 @@ export async function compare(req, res) {
   }
 }
 
-// Track a competitor
+// Track a competitor.
+//
+// requirePlan('competitor') already incremented competitors_tracked
+// atomically (see METERED in planEnforcement.js). If the save below
+// fails for any reason we decrement to keep the counter accurate —
+// otherwise the user "loses" a slot to a save that never landed.
 export async function track(req, res) {
+  const userId = req.user.id;
+  let saved = false;
   try {
-    const userId = req.user.id;
     const { channel_id } = req.body;
 
     if (!channel_id || typeof channel_id !== 'string') {
+      // Roll back the atomic increment from the middleware.
+      await incrementUsage(userId, 'competitors_tracked', -1);
       return res.status(400).json({ success: false, error: 'channel_id is required' });
     }
 
@@ -90,6 +98,7 @@ export async function track(req, res) {
     // the AI's competitor comparisons and the user's UI.
     const channel = await fetchChannelById(channel_id);
     if (!channel) {
+      await incrementUsage(userId, 'competitors_tracked', -1);
       return res.status(404).json({ success: false, error: 'Channel not found' });
     }
 
@@ -102,14 +111,15 @@ export async function track(req, res) {
       total_views: channel.total_views,
       total_videos: channel.total_videos,
     });
-
-    // Keep usage_tracking.competitors_tracked in sync so the plan limit
-    // (3 on Pro, 10 on Max) can actually be enforced.
-    await incrementUsage(userId, 'competitors_tracked');
+    saved = true;
 
     res.json({ success: true, data: tracked });
   } catch (error) {
     console.error('Error tracking competitor:', error);
+    if (!saved) {
+      // Roll back the atomic increment so the user keeps their slot.
+      await incrementUsage(userId, 'competitors_tracked', -1).catch(() => {});
+    }
     res.status(500).json({ success: false, error: 'Failed to track competitor' });
   }
 }

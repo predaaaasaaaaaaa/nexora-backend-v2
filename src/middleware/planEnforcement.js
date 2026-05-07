@@ -27,6 +27,14 @@ const METERED = {
     planKey: 'contentIdeasPerWeek',
     multiplier: 4, // monthly = weekly * 4 (roughly)
   },
+  // Competitor tracking: hard cap (3 Pro, 10 Max). Using the atomic
+  // RPC means parallel "track" calls past the limit are reliably
+  // rejected, and the counter can't drift if one of save/increment
+  // silently fails.
+  competitor: {
+    field: 'competitors_tracked',
+    planKey: 'maxCompetitors',
+  },
 };
 
 function isoMonthStart() {
