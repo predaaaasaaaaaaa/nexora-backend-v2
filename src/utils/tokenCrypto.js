@@ -9,6 +9,34 @@
 // rotate algorithms without a migration. Plaintext tokens stored from
 // before this change still load (decryptToken returns them as-is when no
 // version prefix is present).
+//
+// ─── Key rotation playbook ───────────────────────────────────────
+//
+// Rotating TOKEN_ENCRYPTION_KEY without coordination is destructive —
+// every existing connected_platforms row was encrypted with the old
+// key, and decrypt will return null after rotation, locking users
+// out of their YouTube data until they reconnect.
+//
+// Two-phase rotation (zero-downtime):
+//   1. Add TOKEN_ENCRYPTION_KEY_NEXT alongside TOKEN_ENCRYPTION_KEY.
+//      decryptToken tries the current key first, falls back to
+//      _NEXT (and any older listed via TOKEN_ENCRYPTION_KEYS_OLD).
+//      encryptToken keeps using TOKEN_ENCRYPTION_KEY.
+//   2. Once you're confident in the new key (deploy successful),
+//      flip: TOKEN_ENCRYPTION_KEY = the new key,
+//      TOKEN_ENCRYPTION_KEYS_OLD = the previous key. encryptToken
+//      now uses the new key. Background-rewrite existing rows to
+//      re-encrypt with the new key by reading + re-saving via
+//      handleCallback's upsert path (or a one-off script).
+//   3. After all rows are rewritten, drop TOKEN_ENCRYPTION_KEYS_OLD.
+//
+// Format-version bump (v1 → v2 someday): bump VERSION below.
+// decryptToken checks the prefix, so old v1 ciphertexts still
+// decrypt correctly with the v1 path; new writes use v2.
+//
+// The fallback-key plumbing isn't implemented yet — when you need it,
+// extend getKey() to return an array of keys and try each in order
+// inside decryptToken. Don't change encryptToken's behavior.
 
 import crypto from 'crypto';
 
