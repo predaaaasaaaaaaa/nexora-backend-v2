@@ -24,12 +24,16 @@ import {
     return 'https://nexora-ai.org';
   }
   
-  // Start YouTube OAuth flow
+  // Start YouTube OAuth flow.
+  // Accepts an optional `label` (query string for GET, body for POST) so
+  // the user can name the connection ahead of time. The label is signed
+  // into the OAuth state so it can't be tampered with mid-flight.
   export async function connectYouTube(req, res) {
     try {
       const userId = req.user.id;
-      const authUrl = getAuthUrl(userId);
-  
+      const label = req.query?.label || req.body?.label || null;
+      const authUrl = getAuthUrl(userId, label);
+
       res.json({
         success: true,
         authUrl: authUrl,
@@ -61,10 +65,13 @@ import {
         return res.redirect(`${frontend}/settings?youtube=error&reason=invalid_state`);
       }
 
-      const result = await handleCallback(code, verified.userId);
+      const result = await handleCallback(code, verified.userId, { label: verified.label });
 
-      // Redirect back to frontend settings page with success
-      res.redirect(`${frontend}/settings?youtube=connected&channel=${encodeURIComponent(result.channel_title)}`);
+      // Redirect back to frontend with the typed status so the UI can
+      // pick the right banner (success vs "create a channel" nudge).
+      const params = new URLSearchParams({ youtube: 'connected', status: result.status });
+      if (result.channel_title) params.set('channel', result.channel_title);
+      res.redirect(`${frontend}/settings?${params.toString()}`);
 
     } catch (error) {
       console.error('Error in YouTube callback:', error);

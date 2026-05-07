@@ -57,8 +57,26 @@ export function verifyState(state) {
   return payload;
 }
 
-// Generate OAuth URL for user to connect their YouTube
-export function getAuthUrl(userId) {
+// Sanitize a user-supplied label before it ever reaches the signed state
+// or the database. Strips control chars (which would corrupt logs / mail
+// subjects later), clamps to 60 chars to match the DB CHECK constraint,
+// returns null when nothing useful remains.
+function cleanLabel(raw) {
+  if (typeof raw !== 'string') return null;
+  // eslint-disable-next-line no-control-regex
+  let stripped = "";
+  for (const ch of raw) {
+    const code = ch.charCodeAt(0);
+    if (code >= 32 && code !== 127) stripped += ch;
+  }
+  stripped = stripped.trim();
+  if (!stripped) return null;
+  return stripped.slice(0, 60);
+}
+
+// Generate OAuth URL for user to connect their YouTube.
+// `label` is an optional user-chosen nickname for this connection.
+export function getAuthUrl(userId, label) {
   const oauth2Client = createOAuth2Client();
 
   const scopes = [
@@ -66,8 +84,11 @@ export function getAuthUrl(userId) {
     'https://www.googleapis.com/auth/yt-analytics.readonly',
   ];
 
+  // Embed the cleaned label inside the HMAC-signed state so it can't
+  // be tampered with between getAuthUrl and the callback.
   const state = signState({
     userId,
+    label: cleanLabel(label),
     nonce: crypto.randomBytes(16).toString('hex'),
     exp: Date.now() + 10 * 60 * 1000,
   });
