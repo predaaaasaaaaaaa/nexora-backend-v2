@@ -5,6 +5,24 @@
 -- Same logic as security-migrations-v3.sql, just paste-safe.
 -- ============================================
 
+-- Schema additions FIRST. The functions below reference these columns
+-- (even content-idea quota checks UPSERT a row that mentions
+-- youtube_api_units_used), so if the column is missing every quota
+-- check 42703s and falls closed.
+ALTER TABLE subscription_events
+  ADD COLUMN IF NOT EXISTS event_id TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS subscription_events_event_id_uniq
+  ON subscription_events(event_id)
+  WHERE event_id IS NOT NULL;
+
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS paddle_last_event_at TIMESTAMPTZ;
+
+ALTER TABLE usage_tracking
+  ADD COLUMN IF NOT EXISTS youtube_api_units_used INT NOT NULL DEFAULT 0;
+
+
 DROP FUNCTION IF EXISTS public.check_and_increment_usage(UUID, DATE, TEXT, INT, INT);
 
 CREATE OR REPLACE FUNCTION public.check_and_increment_usage(
