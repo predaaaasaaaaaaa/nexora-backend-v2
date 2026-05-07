@@ -795,8 +795,51 @@ export async function isYouTubeConnected(userId) {
   return data || null;
 }
 
-// Disconnect YouTube
+// Best-effort: revoke a Google OAuth token via Google's revocation
+// endpoint. Returns true if Google accepted the revocation OR if the
+// token was already invalid (200 + invalid_token are both fine for our
+// "make sure it's dead" intent).
+async function revokeGoogleToken(token) {
+  if (!token) return false;
+  try {
+    const r = await fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token }),
+    });
+    // 200 = revoked. 400 with "invalid_token" = already invalid (still good for us).
+    return r.ok || r.status === 400;
+  } catch (err) {
+    console.error('revokeGoogleToken: network error', err.message);
+    return false;
+  }
+}
+
+// Disconnect YouTube. Tells Google to revoke the refresh token before
+// we delete our local row — otherwise the token remains valid until
+// natural expiry, and a future DB compromise could replay it.
 export async function disconnectYouTube(userId) {
+  // Read first so we have the encrypted tokens to send to Google.
+  const { data: row } = await supabase
+    .from('connected_platforms')
+    .select('access_token, refresh_token')
+    .eq('user_id', userId)
+    .eq('platform', 'youtube')
+    .single();
+
+  if (row) {
+    // Revoke the refresh token (preferred — kills the whole grant) and
+    // the access token (defense in depth). Both are best-effort; we
+    // proceed to delete the row even if revocation fails so the user's
+    // disconnect intent isn't blocked by Google being slow.
+    const refresh = decryptToken(row.refresh_token);
+    const access = decryptToken(row.access_token);
+    await Promise.all([
+      revokeGoogleToken(refresh),
+      revokeGoogleToken(access),
+    ]);
+  }
+
   const { error } = await supabase
     .from('connected_platforms')
     .delete()
