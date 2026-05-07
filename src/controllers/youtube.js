@@ -35,13 +35,21 @@ import {
   }
   
   // Start YouTube OAuth flow.
-  // Accepts an optional `label` (query string for GET, body for POST) so
-  // the user can name the connection ahead of time. The label is signed
-  // into the OAuth state so it can't be tampered with mid-flight.
+  //
+  // The optional `label` is read from the request body (POST). Earlier
+  // we accepted it from the query string too, but labels can contain
+  // personal info ("My side hustle - Sarah's account") and query
+  // strings end up in Vercel access logs. Body is private. We still
+  // accept it from query for the GET fallback path, but log a warning
+  // so we can deprecate that once the frontend stops using it.
   export async function connectYouTube(req, res) {
     try {
       const userId = req.user.id;
-      const label = req.query?.label || req.body?.label || null;
+      let label = req.body?.label || null;
+      if (!label && req.query?.label) {
+        label = req.query.label;
+        console.warn('connectYouTube: label received via query string — frontend should POST it instead');
+      }
       const authUrl = getAuthUrl(userId, label);
 
       res.json({
