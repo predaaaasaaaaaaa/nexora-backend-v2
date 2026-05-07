@@ -11,27 +11,6 @@ import {
   logSubscriptionEvent,
 } from '../services/subscription.js';
 
-// Verify Paddle webhook signature
-function verifyWebhookSignature(rawBody, signature) {
-  const secret = process.env.PADDLE_WEBHOOK_SECRET;
-  if (!secret) {
-    console.error('Missing PADDLE_WEBHOOK_SECRET');
-    return false;
-  }
-
-  const hmac = crypto.createHmac('sha256', secret);
-  const digest = hmac.update(rawBody).digest('hex');
-
-  try {
-    const a = Buffer.from(digest);
-    const b = Buffer.from(signature);
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
-
 // Verify the HMAC-signed user_id we minted server-side at checkout time.
 // custom_data is round-tripped by Paddle, so without a signature the field
 // is fully attacker-controlled.
