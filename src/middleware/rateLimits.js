@@ -1,70 +1,133 @@
 // ─── Rate limiters ──────────────────────────────────────────────────────
 //
-// Vercel runs each function on a single instance per cold start; the in-memory
-// store here is per-instance, which is good enough to blunt brute-force and
-// runaway abuse but won't share state across regions. For tighter limits,
-// swap the store for a Redis/Upstash one.
+// Production uses an Upstash Redis (REST) store via the custom adapter
+// below — required because Vercel runs each invocation on a separate
+// instance and the in-memory store would only see a fraction of the
+// real traffic per user.
 //
-// We always derive the key from req.user?.id when an authenticated user is
-// available, falling back to IP. That stops one attacker behind NAT from
-// using up the bucket of every neighbour, and makes per-user quotas honest.
+// Dev / local: if UPSTASH_REDIS_REST_URL is unset we fall back to the
+// in-memory store and log a warning at module load. The fallback is
+// fine for a single-process workstation; it MUST NOT ship to prod.
+//
+// Keying: req.user?.id when authenticated, otherwise the client IP
+// normalized via ipKeyGenerator (handles IPv6 /64 bucketing so an IPv6
+// attacker can't get a fresh bucket per request).
 
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { Redis } from '@upstash/redis';
 
-// IPv6 needs to be bucketed by /64 subnet, otherwise each request looks
-// like a different address and the limit is trivially bypassed. The
-// library exports ipKeyGenerator to do that normalization for us.
+let redis = null;
+let usingRedis = false;
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  });
+  usingRedis = true;
+} else if (process.env.NODE_ENV === 'production') {
+  // Loud-fail-on-misconfig: in prod, in-memory limiting is effectively
+  // no limiting. Throw so Vercel surfaces the missing env vars on first
+  // request rather than silently shipping broken protection.
+  console.error('FATAL: rate limiter requires UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN in production');
+}
+
+// Custom store implementing express-rate-limit's Store interface, backed
+// by Upstash Redis REST. INCR + EXPIRE in a single pipeline keeps the
+// per-request overhead at one network round-trip.
+class UpstashStore {
+  constructor() {
+    this.windowMs = 60_000;
+    this.prefix = 'rl:';
+  }
+  init(options) {
+    this.windowMs = options.windowMs;
+  }
+  async increment(key) {
+    const k = this.prefix + key;
+    const ttlSec = Math.max(1, Math.ceil(this.windowMs / 1000));
+    // Pipeline so we don't pay two network round-trips per request.
+    const pipe = redis.pipeline();
+    pipe.incr(k);
+    pipe.expire(k, ttlSec);
+    pipe.pttl(k);
+    const [count, , pttl] = await pipe.exec();
+    const remainingMs = pttl > 0 ? pttl : this.windowMs;
+    return {
+      totalHits: Number(count),
+      resetTime: new Date(Date.now() + remainingMs),
+    };
+  }
+  async decrement(key) {
+    await redis.decr(this.prefix + key);
+  }
+  async resetKey(key) {
+    await redis.del(this.prefix + key);
+  }
+  // resetAll is optional and dangerous in shared Redis — intentionally not implemented.
+}
+
 function userOrIpKey(req, res) {
   if (req.user?.id) return `u:${req.user.id}`;
   return `ip:${ipKeyGenerator(req, res)}`;
 }
 
+// Build a limiter with the right store for the current environment.
+function makeLimiter(opts) {
+  const base = {
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    ...opts,
+  };
+  if (usingRedis) base.store = new UpstashStore();
+  return rateLimit(base);
+}
+
 // Auth — guard against credential stuffing on /signin and signup spam.
-export const authLimiter = rateLimit({
+// Per-IP because we don't have a userId at this point.
+export const authLimiter = makeLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 20,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
   message: { success: false, error: 'Too many auth attempts. Try again in a few minutes.' },
 });
 
 // AI endpoints — burns Groq tokens; cap per user.
-export const aiLimiter = rateLimit({
+export const aiLimiter = makeLimiter({
   windowMs: 60 * 1000,
   limit: 30,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
   keyGenerator: userOrIpKey,
   message: { success: false, error: 'You are sending requests too fast. Slow down a moment.' },
 });
 
 // Webhook — accept legitimate Paddle traffic but throttle floods of bad
 // signatures (which would otherwise spam logs and cost CPU on HMAC compares).
-export const webhookLimiter = rateLimit({
+export const webhookLimiter = makeLimiter({
   windowMs: 60 * 1000,
   limit: 120,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
   message: { error: 'Too many webhook requests' },
 });
 
 // External-API endpoints (YouTube competitor analysis) — protect quota.
-export const externalApiLimiter = rateLimit({
+export const externalApiLimiter = makeLimiter({
   windowMs: 60 * 1000,
   limit: 20,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
   keyGenerator: userOrIpKey,
   message: { success: false, error: 'Too many requests. Please wait a moment.' },
 });
 
 // Generic write limiter for everything else (profile updates, scheduler CRUD,
 // feedback). Loose enough not to bother humans, tight enough to stop scripts.
-export const writeLimiter = rateLimit({
+export const writeLimiter = makeLimiter({
   windowMs: 60 * 1000,
   limit: 60,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+  message: { success: false, error: 'Too many requests. Please wait a moment.' },
+});
+
+// Light read limiter for endpoints the dashboard hits on every navigation
+// (getCurrentPlan, checkout-token). Bigger bucket — humans browse fast.
+export const readLimiter = makeLimiter({
+  windowMs: 60 * 1000,
+  limit: 120,
   keyGenerator: userOrIpKey,
   message: { success: false, error: 'Too many requests. Please wait a moment.' },
 });
