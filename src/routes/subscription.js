@@ -7,13 +7,14 @@ import {
   getCheckoutToken,
 } from '../controllers/subscription.js';
 import { handleWebhook } from '../controllers/webhook.js';
+import { readLimiter, writeLimiter } from '../middleware/rateLimits.js';
 
 const router = express.Router();
 
-router.get('/plans', getPlans);
-router.post('/webhook', handleWebhook);
-router.get('/current', requireAuth, getCurrentPlan);
-router.get('/portal', requireAuth, getPortalUrl);
-router.get('/checkout-token', requireAuth, getCheckoutToken);
+router.get('/plans', readLimiter, getPlans);
+router.post('/webhook', handleWebhook); // already wrapped in webhookLimiter at server.js
+router.get('/current', requireAuth, readLimiter, getCurrentPlan);
+router.get('/portal', requireAuth, writeLimiter, getPortalUrl);
+router.get('/checkout-token', requireAuth, readLimiter, getCheckoutToken);
 
 export default router;
