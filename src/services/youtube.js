@@ -688,8 +688,10 @@ export async function getYouTubeAnalytics(userId) {
     };
 
     // Mark active on the way out so a previously-stale connection
-    // self-heals once the underlying issue clears. Fire and forget.
-    if (client.platformData?.status !== 'active') {
+    // self-heals once the underlying issue clears. Also clears
+    // last_error so a stale "transient 5xx 3 weeks ago" message can't
+    // sit in the row forever. Fire and forget.
+    if (client.platformData?.status !== 'active' || client.platformData?.last_error) {
       updateConnectionStatus(userId, { status: 'active', last_error: null });
     }
     return result;
