@@ -13,6 +13,7 @@
 // normalized via ipKeyGenerator (handles IPv6 /64 bucketing so an IPv6
 // attacker can't get a fresh bucket per request).
 
+import crypto from 'crypto';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Redis } from '@upstash/redis';
 
@@ -130,4 +131,31 @@ export const readLimiter = makeLimiter({
   limit: 120,
   keyGenerator: userOrIpKey,
   message: { success: false, error: 'Too many requests. Please wait a moment.' },
+});
+
+// Auth-by-email limiter: keyed on a salted hash of the lowercased email.
+// Defends against credential-stuffing campaigns where a single email is
+// hammered from a botnet (each fresh IP would reset the per-IP limiter).
+// Hash so we never put plaintext emails in Redis keys / logs.
+//
+// Salt with the JWT secret so an attacker who somehow gets a Redis dump
+// can't enumerate emails by trying common ones against the keys.
+const EMAIL_SALT = process.env.SUPABASE_JWT_SECRET || process.env.OAUTH_STATE_SECRET || 'nexora-default-salt';
+function emailKey(req) {
+  const raw = String(req.body?.email || '').trim().toLowerCase();
+  if (!raw) return null;
+  return 'em:' + crypto.createHmac('sha256', EMAIL_SALT).update(raw).digest('hex').slice(0, 32);
+}
+
+// Returns the email-hash key, or falls back to IP+route. So a request
+// with no email body (someone probing the route) still gets limited.
+function emailOrIpKey(req, res) {
+  return emailKey(req) || `ip:${ipKeyGenerator(req, res)}`;
+}
+
+export const emailAuthLimiter = makeLimiter({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  limit: 10, // 10 attempts per hour per email
+  keyGenerator: emailOrIpKey,
+  message: { success: false, error: 'Too many attempts for this email. Try again later.' },
 });
