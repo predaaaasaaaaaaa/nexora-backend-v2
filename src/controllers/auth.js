@@ -1,17 +1,57 @@
 import { supabase, supabaseAsUser } from '../services/supabase.js';
 
+// Verify a Cloudflare Turnstile token. Returns true if the token is
+// valid (or if Turnstile isn't configured — dev fallback).
+//
+// Set TURNSTILE_SECRET in production. Get one at
+// https://dash.cloudflare.com/?to=/:account/turnstile (free).
+async function verifyTurnstile(token, remoteip) {
+  const secret = process.env.TURNSTILE_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('TURNSTILE_SECRET missing in production — signup CAPTCHA disabled');
+    }
+    return true; // dev mode: accept anything
+  }
+  if (!token || typeof token !== 'string') return false;
+  try {
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ secret, response: token, remoteip: remoteip || '' }),
+    });
+    const json = await r.json();
+    return Boolean(json.success);
+  } catch (err) {
+    console.error('Turnstile verify error:', err);
+    return false;
+  }
+}
+
 // Sign up new user
 export async function signUp(req, res) {
   try {
-    const { email, password, username } = req.body;
-    
+    const { email, password, username, turnstileToken } = req.body;
+
     if (!email || !password) {
       return res.status(400).json({
         success: false,
         error: 'Email and password are required'
       });
     }
-    
+
+    // CAPTCHA gate. Stops botnets from minting accounts to harvest the
+    // Free tier's AI quota. Honest dev mode: if TURNSTILE_SECRET is
+    // unset we let it through and warn at module load.
+    const captchaOk = await verifyTurnstile(turnstileToken, req.ip);
+    if (!captchaOk) {
+      return res.status(400).json({
+        success: false,
+        error: 'captcha_failed',
+        message: 'Please complete the verification challenge and try again.',
+      });
+    }
+
     // Create user in Supabase Auth
     const { data, error } = await supabase.auth.signUp({
       email,

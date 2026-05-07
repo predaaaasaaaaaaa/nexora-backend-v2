@@ -110,6 +110,22 @@ export async function requireAuth(req, res, next) {
       });
     }
 
+    // Reject unverified email addresses. Without this, a botnet can
+    // mint Free accounts (each with quota) without ever proving email
+    // ownership. Toggle off via REQUIRE_EMAIL_VERIFICATION=false if
+    // you need to support a legacy population that signed up before
+    // this gate.
+    if (process.env.REQUIRE_EMAIL_VERIFICATION !== 'false') {
+      const verified = user.email_confirmed_at || user._claims?.email_confirmed_at;
+      if (!verified) {
+        return res.status(403).json({
+          success: false,
+          error: 'email_not_verified',
+          message: 'Please confirm your email address before using Nexora.',
+        });
+      }
+    }
+
     req.user = user;
     // Expose the raw JWT so controllers that need to act *as* the user
     // (e.g. signOut, user-scoped Supabase clients) can use it.
