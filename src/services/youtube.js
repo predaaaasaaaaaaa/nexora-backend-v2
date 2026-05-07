@@ -80,10 +80,27 @@ export function getAuthUrl(userId) {
   });
 }
 
+// Typed error so callers (especially the OAuth callback) can distinguish
+// "this Google account has no YouTube channel" from a generic failure
+// and surface a useful message to the user.
+export class YouTubeOAuthError extends Error {
+  constructor(reason, message) {
+    super(message);
+    this.name = 'YouTubeOAuthError';
+    this.reason = reason; // machine-readable: 'no_channel' | 'token_exchange_failed' | etc.
+  }
+}
+
 // Exchange auth code for tokens and save them
 export async function handleCallback(code, userId) {
   const oauth2Client = createOAuth2Client();
-  const { tokens } = await oauth2Client.getToken(code);
+
+  let tokens;
+  try {
+    ({ tokens } = await oauth2Client.getToken(code));
+  } catch (err) {
+    throw new YouTubeOAuthError('token_exchange_failed', err.message || 'Token exchange failed');
+  }
   oauth2Client.setCredentials(tokens);
 
   const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
@@ -93,7 +110,12 @@ export async function handleCallback(code, userId) {
   });
 
   const channel = channelResponse.data.items?.[0];
-  if (!channel) throw new Error('No YouTube channel found for this account');
+  if (!channel) {
+    throw new YouTubeOAuthError(
+      'no_channel',
+      'This Google account does not have a YouTube channel.'
+    );
+  }
 
   const { error } = await supabase
     .from('connected_platforms')

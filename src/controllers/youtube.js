@@ -5,7 +5,24 @@ import {
     isYouTubeConnected,
     disconnectYouTube,
     verifyState,
+    YouTubeOAuthError,
   } from '../services/youtube.js';
+
+  // Resolve the URL to redirect the user back to after the OAuth round trip.
+  // Production sets FRONTEND_URL explicitly. In dev we infer from the
+  // request's own host so a localhost OAuth never bounces the user to
+  // production (where they have no session).
+  function resolveFrontend(req) {
+    if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL.replace(/\/$/, '');
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    if (host && /(localhost|127\.0\.0\.1)/.test(host)) {
+      // Frontend dev server is conventionally on a different port than the
+      // API. Default to :3000.
+      const hostname = String(host).split(':')[0];
+      return `http://${hostname}:3000`;
+    }
+    return 'https://nexora-ai.org';
+  }
   
   // Start YouTube OAuth flow
   export async function connectYouTube(req, res) {
@@ -28,7 +45,7 @@ import {
   
   // Handle OAuth callback from Google
   export async function youtubeCallback(req, res) {
-    const frontend = process.env.FRONTEND_URL || 'https://nexora-ai.org';
+    const frontend = resolveFrontend(req);
     try {
       const { code, state } = req.query;
 
@@ -51,8 +68,11 @@ import {
 
     } catch (error) {
       console.error('Error in YouTube callback:', error);
-      // Don't echo error.message back to the URL — it can leak internals.
-      res.redirect(`${frontend}/settings?youtube=error&reason=callback_failed`);
+      // Pass a typed reason to the UI so it can show a useful message.
+      // Anything we don't recognize falls back to a generic code — no
+      // raw error.message in the URL.
+      const reason = error instanceof YouTubeOAuthError ? error.reason : 'callback_failed';
+      res.redirect(`${frontend}/settings?youtube=error&reason=${encodeURIComponent(reason)}`);
     }
   }
   
