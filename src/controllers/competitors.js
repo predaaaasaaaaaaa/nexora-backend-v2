@@ -1,5 +1,6 @@
 import { searchCompetitors, analyzeCompetitor, compareWithUser, saveTrackedCompetitor, getTrackedCompetitors, removeTrackedCompetitor, fetchChannelById } from '../services/competitors.js';
 import { incrementUsage, consumeYouTubeQuota, YouTubeQuotaExceededError } from '../services/subscription.js';
+import { trackEvent } from '../services/tracking.js';
 
 // Approximate YouTube API quota cost per operation. Source:
 // https://developers.google.com/youtube/v3/determine_quota_cost
@@ -48,6 +49,11 @@ export async function analyze(req, res) {
     await consumeYouTubeQuota(req.user.id, req.userPlan || 'free', QUOTA_COST.analyze);
 
     const analysis = await analyzeCompetitor(channelId);
+
+    // Product event: a competitor analysis ran. Platform enum only — no
+    // channel identifiers or analysis content. Competitors are YouTube-only.
+    trackEvent(req.user.id, 'competitor_analyzed', { platform: 'youtube' });
+
     res.json({ success: true, data: analysis });
   } catch (error) {
     if (error instanceof YouTubeQuotaExceededError) return quotaErrorResponse(res, error);
