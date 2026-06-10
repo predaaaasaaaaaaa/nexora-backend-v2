@@ -2,6 +2,7 @@ import { processAIRequest } from '../services/unifiedAI.js';
 import { supabase, supabaseAsUser } from '../services/supabase.js';
 import { searchCompetitors, analyzeCompetitor, compareWithUser, formatCompetitorForAI } from '../services/competitors.js';
 import { isSupportedPlatform, SUPPORTED_PLATFORMS } from '../utils/helpers.js';
+import { trackEvent } from '../services/tracking.js';
 
 // List all conversations for a user
 export async function listConversations(req, res) {
@@ -439,6 +440,13 @@ export async function chatWithCoach(req, res) {
         context_used: response.contextUsed || null,
       },
     ]);
+
+    // Product event: the user's coach query landed. IDs/enums only — never
+    // the message content (PII). Fire-and-forget, never awaited into the path.
+    trackEvent(userId, 'coach_query_sent', {
+      conversation_id: activeConversationId,
+      platform: platform || 'youtube',
+    });
 
     // Auto-title: use first user message as title (trimmed)
     if (!conversationId) {
