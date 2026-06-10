@@ -13,6 +13,7 @@ import feedbackRoutes from './routes/feedback.js';
 import youtubeRoutes from './routes/youtube.js';
 import competitorsRoutes from './routes/competitors.js';
 import subscriptionRoutes from './routes/subscription.js';
+import trackRoutes from './routes/track.js';
 import { webhookLimiter } from './middleware/rateLimits.js';
 
 const app = express();
@@ -125,6 +126,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/youtube', youtubeRoutes);
 app.use('/api/competitors', competitorsRoutes);
 app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/track', trackRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'Nexora backend running' });
