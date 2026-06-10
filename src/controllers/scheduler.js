@@ -1,5 +1,6 @@
 import { supabase, supabaseAsUser } from '../services/supabase.js';
 import { processAIRequest } from '../services/unifiedAI.js';
+import { trackEvent } from '../services/tracking.js';
 import {
   isSupportedPlatform,
   isSupportedContentType,
@@ -213,6 +214,13 @@ export async function createScheduledPost(req, res) {
       .single();
 
     if (error) throw error;
+
+    // Product event: a post was scheduled. Platform + content_type enums
+    // only — never the title/description. Read off the persisted row.
+    trackEvent(userId, 'post_scheduled', {
+      platform: data.platform,
+      content_type: data.content_type,
+    });
 
     res.json({ success: true, post: data });
 
