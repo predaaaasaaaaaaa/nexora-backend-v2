@@ -1,5 +1,6 @@
 import { processAIRequest } from '../services/unifiedAI.js';
 import { incrementUsage } from '../services/subscription.js';
+import { trackEvent } from '../services/tracking.js';
 
 // Bound user-controlled inputs that flow into the AI prompt. Without
 // caps, count=10000000 + a 10MB niche string both pad the input token
@@ -66,6 +67,9 @@ export async function generateIdeas(req, res) {
       await incrementUsage(userId, 'content_ideas_used');
     }
 
+    // Product event: ideas generated. Count only — never the idea text.
+    trackEvent(userId, 'content_ideas_generated', { count });
+
     res.json({
       success: true,
       platform: platform,
@@ -116,6 +120,9 @@ export async function generateAllIdeas(req, res) {
     });
 
     await incrementUsage(userId, 'content_ideas_used');
+
+    // Product event: ideas generated (multi-platform variant). Count only.
+    trackEvent(userId, 'content_ideas_generated', { count });
 
     res.json({
       success: true,
