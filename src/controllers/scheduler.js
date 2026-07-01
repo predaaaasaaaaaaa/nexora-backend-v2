@@ -217,7 +217,10 @@ export async function createScheduledPost(req, res) {
 
     // Product event: a post was scheduled. Platform + content_type enums
     // only — never the title/description. Read off the persisted row.
-    trackEvent(userId, 'post_scheduled', {
+    // Awaited so the insert lands before res.json() freezes the serverless
+    // function; trackEvent swallows its own errors, so awaiting can't break
+    // the handler — it only guarantees the write and logs real DB errors.
+    await trackEvent(userId, 'post_scheduled', {
       platform: data.platform,
       content_type: data.content_type,
     });

@@ -442,8 +442,11 @@ export async function chatWithCoach(req, res) {
     ]);
 
     // Product event: the user's coach query landed. IDs/enums only — never
-    // the message content (PII). Fire-and-forget, never awaited into the path.
-    trackEvent(userId, 'coach_query_sent', {
+    // the message content (PII). Awaited so the insert completes before the
+    // serverless function terminates on res.json(); trackEvent still can't
+    // throw, so awaiting only guarantees the write lands (and surfaces real
+    // Supabase errors in logs), it can't break the handler path.
+    await trackEvent(userId, 'coach_query_sent', {
       conversation_id: activeConversationId,
       platform: platform || 'youtube',
     });

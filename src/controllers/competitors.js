@@ -52,7 +52,10 @@ export async function analyze(req, res) {
 
     // Product event: a competitor analysis ran. Platform enum only — no
     // channel identifiers or analysis content. Competitors are YouTube-only.
-    trackEvent(req.user.id, 'competitor_analyzed', { platform: 'youtube' });
+    // Awaited so the insert lands before res.json() freezes the serverless
+    // function; trackEvent swallows its own errors, so awaiting can't break
+    // the handler — it only guarantees the write and logs real DB errors.
+    await trackEvent(req.user.id, 'competitor_analyzed', { platform: 'youtube' });
 
     res.json({ success: true, data: analysis });
   } catch (error) {

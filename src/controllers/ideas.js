@@ -68,7 +68,10 @@ export async function generateIdeas(req, res) {
     }
 
     // Product event: ideas generated. Count only — never the idea text.
-    trackEvent(userId, 'content_ideas_generated', { count });
+    // Awaited so the insert lands before res.json() freezes the serverless
+    // function; trackEvent swallows its own errors, so awaiting can't break
+    // the handler — it only guarantees the write and logs real DB errors.
+    await trackEvent(userId, 'content_ideas_generated', { count });
 
     res.json({
       success: true,
@@ -122,7 +125,10 @@ export async function generateAllIdeas(req, res) {
     await incrementUsage(userId, 'content_ideas_used');
 
     // Product event: ideas generated (multi-platform variant). Count only.
-    trackEvent(userId, 'content_ideas_generated', { count });
+    // Awaited so the insert lands before res.json() freezes the serverless
+    // function; trackEvent swallows its own errors, so awaiting can't break
+    // the handler — it only guarantees the write and logs real DB errors.
+    await trackEvent(userId, 'content_ideas_generated', { count });
 
     res.json({
       success: true,
