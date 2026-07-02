@@ -207,6 +207,86 @@ async function markMissedPosts() {
   }
 }
 
+// ============================================================
+// TELEMETRY DRIFT ALERT — used by the reconcile guard
+// ============================================================
+// Sends a drift alert over the channel the backend already has (Resend email).
+// Recipient is ALERT_EMAIL, falling back to the address in RESEND_FROM_EMAIL
+// (which is "NEXORA <addr@domain>" — we extract the bare address). Throws on
+// send failure so the caller can record alertError and still keep its
+// telemetry_health row + CRITICAL log (defense in depth: the email is never the
+// only signal).
+function alertRecipient() {
+  if (process.env.ALERT_EMAIL) return process.env.ALERT_EMAIL;
+  // Pull "addr@domain" out of "Name <addr@domain>" or accept a bare address.
+  const m = FROM_EMAIL.match(/<([^>]+)>/);
+  return m ? m[1] : FROM_EMAIL;
+}
+
+export async function sendTelemetryAlert({
+  checkDate,
+  sourceUsers,
+  activatedUsers,
+  drift,
+  tolerance,
+  status,
+  persistError = null,
+}) {
+  const to = alertRecipient();
+
+  // drift = activatedUsers - sourceUsers (signed). Name the direction so the
+  // subject/body are actionable at a glance.
+  const direction =
+    drift > 0 ? 'UNDERCOUNT (coach_query_sent below activation)'
+      : drift < 0 ? 'OVER-FIRING (coach_query_sent above activation)'
+        : 'health-write failure';
+
+  const subject = stripHeaderUnsafe(
+    `🚨 Telemetry drift [${direction.split(' ')[0]}]: source ${sourceUsers} vs activated ${activatedUsers} (${checkDate})`,
+  );
+
+  const rows = [
+    ['Check date', checkDate],
+    ['coach_query_sent distinct users (source)', String(sourceUsers)],
+    ['activated users (truth)', String(activatedUsers)],
+    ['drift (activated − source, signed)', String(drift)],
+    ['tolerance', String(tolerance)],
+    ['direction', direction],
+    ['status', status],
+  ];
+  if (persistError) rows.push(['telemetry_health write error', persistError]);
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px;">
+      <h1 style="font-size: 20px; color: #b00020; margin: 0 0 8px 0;">🚨 Telemetry reconcile drift</h1>
+      <p style="color: #444; font-size: 14px; margin: 0 0 16px 0;">
+        The daily reconcile guard found coach_query_sent distinct-users diverging from
+        activated-users beyond tolerance. This is the failure mode the await-fix closed —
+        investigate whether server-side <code>trackEvent()</code> writes are dropping again
+        (or over-firing).
+      </p>
+      <table style="border-collapse: collapse; font-size: 14px;">
+        ${rows.map(([k, v]) => `
+          <tr>
+            <td style="padding: 4px 12px 4px 0; color: #888;">${escapeHtml(k)}</td>
+            <td style="padding: 4px 0; font-weight: 600; color: #111;">${escapeHtml(v)}</td>
+          </tr>`).join('')}
+      </table>
+      <p style="color: #999; font-size: 12px; margin: 16px 0 0 0;">
+        Sent by NEXORA telemetry guard • /api/internal/reconcile-telemetry
+      </p>
+    </div>
+  `;
+
+  const { error } = await resend.emails.send({ from: FROM_EMAIL, to, subject, html });
+  if (error) {
+    // Surface as a throw so the guard records alertError; message includes the
+    // Resend detail for the logs.
+    throw new Error(`Resend telemetry alert failed: ${error.message || JSON.stringify(error)}`);
+  }
+  return true;
+}
+
 // Start the notification cron (runs every 5 minutes)
 export function startNotificationCron() {
   console.log('🔔 Notification cron started — checking every 5 minutes');
